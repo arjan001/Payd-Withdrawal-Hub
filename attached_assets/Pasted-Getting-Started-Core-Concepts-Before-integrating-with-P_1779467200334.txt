@@ -1,0 +1,98 @@
+Getting Started
+Core Concepts
+Before integrating with Payd, it's important to understand the fundamental concepts that underpin every transaction.
+
+Transaction reference
+Every Payd transaction generates a unique transaction_reference. This is the primary identifier used across the entire lifecycle of a transaction:
+
+API responses - Returned when a transaction is initiated
+Webhooks - Included in every callback notification
+Reconciliation - Used to match and verify transactions
+Support - Required when contacting Payd about a transaction
+Example response with transaction_reference
+Copy
+{
+  "transaction_reference": "9BD103350408eR",
+  "success": true,
+  "status": "SUCCESS",
+  "message": "Processed successfully"
+}
+The suffix of the reference indicates the transaction type:
+
+SUFFIX	TYPE
+eR	Receipt (payin/collection)
+eW	Withdrawal (payout)
+eS	Payd-to-Payd transfer
+eT	Top-up
+Always store the transaction reference. Save the transaction_reference from every API response. You'll need it to correlate webhooks, handle support queries, reconcile payments, and look up transaction status.
+Source of truth for status
+A common mistake when integrating payment APIs is to assume a successful API response means the transaction is complete. With Payd, the flow is asynchronous:
+
+CONTEXT	SOURCE OF TRUTH
+Was the API request accepted?	success boolean in API response
+Did the transaction actually complete?	result_code + status in webhook
+Transaction succeeded	result_code = 0 and status = "success"
+Transaction failed	result_code ≠ 0 and status = "failed"
+Never rely on the API response alone. The initial API response only confirms that the request was received and processing has started. The webhook callback is the only reliable indicator of whether the transaction ultimately succeeded or failed.
+Transaction flow
+Here's what happens when you initiate a Payd transaction:
+
+1
+Your server sends an API request
+POST to the relevant endpoint with authentication and payload
+
+2
+Payd validates and processes
+Returns transaction_reference and success: true
+
+3
+User action required (if applicable)
+Customer enters M-Pesa PIN, completes bank transfer, etc.
+
+4
+Webhook delivered to your callback_url
+Contains result_code - the definitive transaction outcome
+
+Transaction categories
+Payd APIs support the following transaction types. Each has slightly different request formats and flows, but all converge on a transaction reference and webhook callback.
+
+Collections (Payins)
+• Kenya M-Pesa (STK Push)
+• Pan-African mobile money & bank
+• Card payments (Visa, Mastercard)
+Payouts
+• Mobile money wallets
+• Bank accounts
+• Merchants (Paybill / Till)
+• Other Payd users
+Key integration principles
+📦
+Always store the transaction_reference
+This is your primary key for tracking, reconciliation, and support.
+
+🔔
+Always wait for webhook confirmation
+Don't mark transactions as complete based on the API response alone.
+
+🔍
+Network discovery is required for Pan-African flows
+Before processing pan-African transactions, query available networks and use their IDs in your request.
+
+🔀
+Handle hosted checkouts for cards and South African banks
+Some payment methods return a checkout URL that the user must be redirected to.
+
+UP NEXT
+🔔
+Webhooks
+Set up callback handling
+
+💳
+Kenya Payins
+Your first collection integration
+
+Payd
+© 2026 Payd. All rights reserved.
+payd.money
+Dashboard
+Support

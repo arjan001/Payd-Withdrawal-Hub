@@ -1,0 +1,105 @@
+Getting Started
+Introduction
+Payd is a global payments platform that makes it simple for freelancers, creatives, remote workers, and the businesses that work with them to get paid globally and spend locally. The Payd API lets you integrate payments directly into your application.
+
+What you can build
+💳
+Collect Payments
+Accept M-Pesa, mobile money, bank transfers, and card payments from customers across Africa.
+
+🏦
+Send Payouts
+Disburse funds to mobile wallets, bank accounts, and merchant accounts across the continent.
+
+🔄
+Internal Transfers
+Move money instantly between Payd accounts with zero fees.
+
+🌍
+Pan-African Coverage
+Reach customers and partners in Kenya, Nigeria, South Africa, and more with a single integration.
+
+Base URL
+All Payd API requests are made against a single production base URL:
+
+Base URL
+Copy
+https://api.payd.money
+No sandbox yet. Payd currently operates in production only. A sandbox environment is under development. In the meantime, test with small transaction amounts within network limits and always rely on webhook callbacks to confirm final transaction status.
+Quick start
+Follow these steps to make your first API call:
+
+1
+Create a Payd account
+Sign up at app.payd.money and complete KYC verification to activate your account.
+
+2
+Generate API keys
+Go to Profile → API Keys in the Payd dashboard. Name your key and save the username and password securely - they are shown only once.
+
+3
+Make your first API call
+Use HTTP Basic Authentication with your credentials to call any Payd endpoint. Start with a small M-Pesa collection to verify your integration.
+
+4
+Handle webhooks
+Set up a callback URL to receive transaction status updates. The webhook is the source of truth for whether a transaction succeeded or failed.
+
+Your first request
+Here's a simple M-Pesa collection request to get started. Replace the credentials and phone number with your own:
+
+cURL
+Copy
+curl -X POST https://api.payd.money/api/v2/payments \
+  -u 'YOUR_API_USERNAME:YOUR_API_PASSWORD' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "username": "your_payd_username",
+    "channel": "MPESA",
+    "amount": 10,
+    "phone_number": "0700000000",
+    "narration": "Test payment",
+    "currency": "KES",
+    "callback_url": "https://your-server.com/webhook"
+  }'
+What happens next? If successful, the customer receives an STK push on their phone to authorize the payment. Once they enter their M-Pesa PIN, Payd sends a webhook to your callback_url with the final result.
+Supported markets
+Payd currently supports 20 countries across Africa. See full coverage details at payd.money/coverage and pricing at payd.money/pricing (custom pricing may apply).
+
+COUNTRY	DIAL CODE	CURRENCY
+🇰🇪 Kenya	+254	KES
+🇺🇬 Uganda	+256	UGX
+🇷🇼 Rwanda	+250	RWF
+🇹🇿 Tanzania	+255	TZS
+🇬🇭 Ghana	+233	GHS
+🇳🇬 Nigeria	+234	NGN
+🇨🇮 Cote d'Ivoire	+225	XOF
+🇸🇳 Senegal	+221	XOF
+🇹🇬 Togo	+228	XOF
+🇧🇯 Benin	+229	XOF
+🇲🇱 Mali	+223	XOF
+🇧🇫 Burkina Faso	+226	XOF
+🇨🇲 Cameroon	+237	XAF
+🇬🇦 Gabon	+241	XAF
+🇨🇬 Republic of Congo	+242	XAF
+🇨🇩 DR Congo	+243	CDF
+🇿🇦 South Africa	+27	ZAR
+🇿🇲 Zambia	+260	ZMW
+🇲🇼 Malawi	+265	MWK
+🇧🇼 Botswana	+267	BWP
+Use the Network Discovery API to check which payment networks (mobile money and bank) are available in each country.
+
+GET STARTED
+🔑
+Authentication
+Set up your API credentials
+
+📖
+Core Concepts
+Understand how Payd APIs work
+
+Payd
+© 2026 Payd. All rights reserved.
+payd.money
+Dashboard
+Support

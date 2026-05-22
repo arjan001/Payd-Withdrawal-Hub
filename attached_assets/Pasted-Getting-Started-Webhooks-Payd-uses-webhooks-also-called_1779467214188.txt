@@ -1,0 +1,224 @@
+Getting Started
+Webhooks
+Payd uses webhooks (also called callbacks) to notify your application about the final outcome of a transaction. This is the only reliable way to know whether a payment succeeded or failed.
+
+How webhooks work
+When you initiate a payment via the Payd API, you include a callback_url (also referred to as forward_url) in your request payload. Once the transaction reaches its final state — success or failure — Payd sends an HTTP POST request to that URL with a JSON body containing the result.
+
+YOUR SERVER
+POST /api/v2/payments
+Includes callback_url
+→
+PAYD
+Processes transaction
+Waits for final outcome
+→
+YOUR CALLBACK URL
+POST /webhook/payd
+Receives JSON result
+Callback URL must be publicly reachable. Payd will POST the webhook to the exact URL you provided. Make sure it is accessible over the internet and responds with an HTTP 200 status code.
+Kenya M-Pesa webhooks
+When a Kenya M-Pesa transaction completes, Payd forwards the result to your callback_url. The payload shape differs slightly between success and failure outcomes.
+
+Successful M-Pesa transaction
+On success, you receive the full transaction details including the M-Pesa receipt number in third_party_trans_id.
+
+M-Pesa Success Webhook
+Copy
+{
+  "transaction_reference": "9BD103739849eR",
+  "result_code": 0,
+  "remarks": "Successfully processes m-pesa transaction",
+  "third_party_trans_id": "UB9C46DH3Q",
+  "amount": 10,
+  "transaction_date": "2026-02-09 10:37:50.286784611 +0000 UTC m=+448005.605396772",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "user_id": "0de616fc-61f7-46e2-aa36-4c9eda58ed37",
+  "customer_name": "",
+  "success": true,
+  "web3_transaction_reference": ""
+}
+Failed M-Pesa transaction
+On failure, the payload is smaller. Fields like amount, third_party_trans_id, and user_id are omitted. The remarks field contains the failure reason.
+
+M-Pesa Failure Webhook
+Copy
+{
+  "transaction_reference": "9BD104311505eR",
+  "result_code": 1,
+  "remarks": "Transaction failed with message: [Request Cancelled by user.]",
+  "transaction_date": "November",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "success": false,
+  "status": ""
+}
+Kenya M-Pesa failure codes For Kenya M-Pesa, a result_code of 1 indicates the transaction failed (e.g., user cancelled, insufficient funds, or timeout). Always check remarks for the specific failure message.
+Pan-African webhooks
+Pan-African transactions (mobile money networks across Africa outside of Kenya M-Pesa) follow a similar webhook pattern but have some differences in field values.
+
+Successful Pan-African transaction
+On success, the amount is computed in KES (the accounting currency). The third_party_trans_id is the transaction ID from the network if available; otherwise, the Payd reference is used. The customer_name may contain the customer's phone number.
+
+Pan-African Success Webhook
+Copy
+{
+  "transaction_reference": "9BD113419309eW",
+  "result_code": 0,
+  "remarks": "complete",
+  "third_party_trans_id": "9BD113419309eW",
+  "amount": 132.61,
+  "transaction_date": "2026-02-09 11:34:42.692858332 +0000 UTC m=+451424.989475964",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "user_id": "0de616fc-61f7-46e2-aa36-4c9eda58ed37",
+  "customer_name": "+250700000000",
+  "success": true,
+  "web3_transaction_reference": ""
+}
+Failed Pan-African transaction
+On failure, the payload includes a status field (e.g., "failed") and uses a different result code.
+
+Pan-African Failure Webhook
+Copy
+{
+  "transaction_reference": "9BD110009989eR",
+  "result_code": 3000,
+  "remarks": "other",
+  "transaction_date": "2026-02-09 11:11:38.71307619 +0000 UTC m=+13396.698281768",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "success": false,
+  "status": "failed"
+}
+Pan-African failure codes For Pan-African transactions, a result_code of 3000 indicates a generic failure. Check the remarks and status fields for details.
+Webhook fields reference
+Below is a complete reference of all fields that may appear in a Payd webhook payload. Not all fields are present in every webhook — failed transactions typically omit fields like amount and third_party_trans_id.
+
+FIELD	TYPE	DESCRIPTION
+transaction_reference	string	Unique Payd transaction identifier. Use this as an idempotency key.
+result_code	integer	0 = success. Non-zero = failure (1 for Kenya M-Pesa, 3000 for Pan-African).
+remarks	string	Human-readable description of the outcome. Contains the failure reason on error.
+third_party_trans_id	string	External provider transaction ID. For M-Pesa this is the Safaricom receipt number. For Pan-African it is the network transaction ID if available, otherwise the Payd reference.
+amount	number	Transaction amount. For Pan-African transactions this is computed in KES (accounting currency). Present on success.
+transaction_date	string	Timestamp of the transaction. Format may vary between success and failure payloads.
+forward_url	string	The callback URL that this webhook was delivered to (mirrors your original callback_url).
+order_id	string	Your custom order identifier, if provided in the original request. Empty string if not set.
+user_id	string	The Payd user ID associated with the transaction. Present on success.
+customer_name	string	Customer name or phone number. May be empty for M-Pesa; may contain the phone number for Pan-African.
+success	boolean	true if the transaction succeeded, false otherwise.
+status	string	Transaction status string. Typically present on failure payloads (e.g., "failed"). May be empty.
+web3_transaction_reference	string	Web3/blockchain transaction reference. Empty string for non-Web3 transactions.
+Key fields explained
+result_code
+The primary indicator of transaction outcome. A value of 0 means the transaction succeeded. For failures, Kenya M-Pesa uses 1 and Pan-African uses 3000. Always check this field alongside success for reliable determination.
+
+third_party_trans_id
+The transaction ID from the external payment network. For Kenya M-Pesa, this is the Safaricom M-Pesa receipt number (e.g., UB9C46DH3Q). For Pan-African transactions, this is the network's transaction ID if one was returned; otherwise, Payd passes its own reference. Only present on success.
+
+transaction_reference
+The unique Payd-generated reference for the transaction. This is present in every webhook (success and failure) and should be used as your idempotency key to prevent duplicate processing.
+
+Result codes
+The result_code values differ by transaction type:
+
+CODE	TYPE	MEANING	ACTION
+0	All	Success	Transaction completed — fulfill the order
+1	Kenya M-Pesa	Failed	User cancelled, insufficient funds, timeout, or other M-Pesa error
+3000	Pan-African	Failed	Generic network failure — check remarks and status for details
+Handling webhooks
+Your webhook endpoint should accept an HTTP POST request with a JSON body. Below are examples for common server frameworks:
+
+Node.js (Express)
+Python (Flask)
+PHP
+Go
+javascript
+Copy
+const express = require('express');
+const app = express();
+
+app.use(express.json());
+
+app.post('/webhook/payd', (req, res) => {
+  const {
+    transaction_reference,
+    result_code,
+    remarks,
+    success,
+    amount,
+    third_party_trans_id,
+    customer_name,
+    status
+  } = req.body;
+
+  // Always respond 200 immediately to acknowledge receipt
+  res.status(200).json({ received: true });
+
+  // Log the incoming webhook
+  console.log('Webhook received:', transaction_reference);
+
+  if (result_code === 0 && success) {
+    // Transaction succeeded
+    console.log('Payment successful:', amount);
+    console.log('Third-party ID:', third_party_trans_id);
+    // TODO: Update your database, fulfill the order, etc.
+    // Use transaction_reference as idempotency key
+  } else {
+    // Transaction failed
+    console.log('Payment failed:', remarks);
+    console.log('Result code:', result_code, '| Status:', status);
+    // TODO: Mark order as failed, notify user, etc.
+  }
+});
+
+app.listen(3000, () => console.log('Webhook server running on :3000'));
+Best practices
+200
+Respond with HTTP 200 immediately
+Send a 200 response as soon as you receive the webhook, before doing any heavy processing. This prevents Payd from treating the delivery as failed.
+
+#
+Handle webhooks idempotently
+Use transaction_reference as a unique key. Before processing, check if you have already handled this transaction to avoid duplicate fulfillment.
+
+S
+Use HTTPS for your callback URL
+Always use an HTTPS endpoint in production to ensure webhook data is encrypted in transit.
+
+L
+Log all incoming webhooks
+Persist the full webhook payload for every delivery. This is invaluable for debugging, reconciliation, and resolving disputes.
+
+A
+Process asynchronously
+If your webhook handler involves heavy work (e.g., sending emails, updating multiple records), queue the work and return 200 immediately. Process the payload in a background job.
+
+Quick checklist
+Respond with HTTP 200 immediately
+Process the webhook asynchronously if it requires heavy work
+Handle duplicate webhooks idempotently (use transaction_reference as a key)
+Log all incoming webhooks for debugging and reconciliation
+Use HTTPS for your callback URL in production
+Check both result_code and success to determine transaction outcome
+CONTINUE READING
+💳
+Kenya Payins
+Collect M-Pesa payments in Kenya
+
+Pan-African Payins
+Collect mobile money across Africa
+
+API Playground
+Test endpoints interactively
+
+🔑
+Authentication
+Set up API credentials
+
+Payd
+© 2026 Payd. All rights reserved.
+payd.money
+Dashboard
+Support

@@ -1,0 +1,87 @@
+Getting Started
+Authentication
+Payd uses HTTP Basic Authentication for all API requests. You'll need to generate API credentials from your Payd dashboard before making any calls.
+
+Generating API keys
+To get your API credentials, follow these steps in the Payd web app:
+
+1
+Log in to the Payd Web App
+Go to app.payd.money and sign in with your Payd account. Your account must be activated and KYC verified.
+
+2
+Navigate to API Keys
+On desktop: open the Profile dropdown (top-right corner). On mobile: go to My Account. Then select API Keys.
+
+3
+Create a new API key
+Give your API key a descriptive name (e.g., Production or My App) and click generate.
+
+4
+Save your credentials
+Payd will display a Username and Password. Copy and store them securely - these credentials are shown only once and cannot be retrieved later.
+
+Important Your API credentials are shown only once when generated. Store them securely in your environment variables or a secrets manager. If you lose your credentials, you'll need to generate a new API key.
+How authentication works
+Every API request must include an Authorization header with your credentials encoded in Base64:
+
+Authorization Header
+Copy
+Authorization: Basic base64(username:password)
+For example, if your API username is my_api_user and password is my_api_pass, the header would be:
+
+Example Header
+Copy
+Authorization: Basic bXlfYXBpX3VzZXI6bXlfYXBpX3Bhc3M=
+Most HTTP libraries handle Basic Auth natively - you typically don't need to manually encode the header.
+
+Authenticated request examples
+Here's how to make an authenticated API call in different languages. This example initiates an M-Pesa collection:
+
+cURL
+JavaScript
+Python
+PHP
+Go
+bash
+Copy
+curl -X POST https://api.payd.money/api/v2/payments \
+  -u 'YOUR_API_USERNAME:YOUR_API_PASSWORD' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "username": "your_payd_username",
+    "channel": "MPESA",
+    "amount": 10,
+    "phone_number": "0700000000",
+    "narration": "Payment for goods",
+    "currency": "KES",
+    "callback_url": "https://your-server.com/callback"
+  }'
+What your credentials authenticate
+Your API credentials provide access to all Payd API operations:
+
+Collections / Payins - Accept payments via M-Pesa, mobile money, bank transfers, and cards
+Payouts - Send money to mobile wallets, bank accounts, and merchants
+Network discovery - Query available payment networks and channels
+Payd-to-Payd transfers - Move money between Payd accounts
+Security best practices
+🔒
+Never expose credentials in client-side code
+Always make API calls from your server. Never include API keys in frontend JavaScript, mobile apps, or public repositories.
+
+🗝️
+Use environment variables
+Store credentials in environment variables or a secrets manager like AWS Secrets Manager, Vault, or your platform's native secret store.
+
+🔄
+Rotate keys regularly
+Generate new API keys periodically. Revoke any keys you suspect may have been compromised.
+
+UP NEXT
+📖
+Core Concepts
+Learn about transaction references and webhooks
+
+💳
+Kenya Payins
+Start collecting M-Pesa payments
