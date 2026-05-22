@@ -10,7 +10,7 @@ import {
   InitiatePayoutResponse,
   GetSummaryResponse,
 } from "@workspace/api-zod";
-import { paydGet, paydPost, invalidateToken } from "../lib/payd";
+import { paydGet, paydPost, getAccountUsername, getCallbackBase } from "../lib/payd";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -26,6 +26,9 @@ function paydError(err: unknown): { status: number; message: string } {
       (typeof data === "object" && data !== null && "error" in data
         ? String((data as Record<string, unknown>)["error"])
         : null) ||
+      (typeof data === "object" && data !== null && "error_message" in data
+        ? String((data as Record<string, unknown>)["error_message"])
+        : null) ||
       err.message ||
       "Unknown error";
     return { status, message };
@@ -33,42 +36,46 @@ function paydError(err: unknown): { status: number; message: string } {
   return { status: 500, message: String(err) };
 }
 
+// GET /api/payd/account — fetch balances from Payd
 router.get("/payd/account", async (req, res): Promise<void> => {
   try {
-    const username = process.env["PAYD_USERNAME"] ?? "unknown";
+    const username = getAccountUsername();
+    const rawData = await paydGet<Record<string, unknown>>(
+      `/api/v1/accounts/${username}/all_balances`,
+    );
 
-    let rawData: unknown;
-    try {
-      rawData = await paydGet("/v2/accounts/me");
-    } catch {
-      try {
-        rawData = await paydGet("/v1/accounts/me");
-      } catch {
-        rawData = await paydGet("/v2/profile");
-      }
+    req.log.debug({ rawData }, "Payd balances raw response");
+
+    const fiat = rawData["fiat_balance"] as Record<string, unknown> | undefined;
+    const onchain = rawData["onchain_balance"] as Record<string, unknown> | undefined;
+
+    const balances = [];
+    if (fiat) {
+      // fiat_balance is always the local KES wallet per Payd docs
+      balances.push({
+        currency: "KES",
+        available_balance: Number(fiat["balance"] ?? fiat["converted_balance"] ?? 0),
+        ledger_balance: Number(fiat["converted_balance"] ?? fiat["balance"] ?? 0),
+      });
+    }
+    if (onchain) {
+      // onchain_balance is always the USD wallet per Payd docs
+      balances.push({
+        currency: "USD",
+        available_balance: Number(onchain["balance"] ?? onchain["converted_balance"] ?? 0),
+        ledger_balance: Number(onchain["converted_balance"] ?? onchain["balance"] ?? 0),
+      });
+    }
+    if (balances.length === 0) {
+      balances.push({ currency: "KES", available_balance: 0, ledger_balance: 0 });
     }
 
-    req.log.debug({ rawData }, "Payd account raw response");
-
-    const data = rawData as Record<string, unknown>;
-    const balancesRaw = (data["balances"] ?? data["wallet"] ?? data["wallets"] ?? []) as unknown[];
-    const balances = Array.isArray(balancesRaw)
-      ? balancesRaw.map((b) => {
-          const wallet = b as Record<string, unknown>;
-          return {
-            currency: String(wallet["currency"] ?? wallet["currency_code"] ?? "KES"),
-            available_balance: Number(wallet["available_balance"] ?? wallet["balance"] ?? 0),
-            ledger_balance: Number(wallet["ledger_balance"] ?? wallet["available_balance"] ?? wallet["balance"] ?? 0),
-          };
-        })
-      : [{ currency: "KES", available_balance: 0, ledger_balance: 0 }];
-
     const result = GetAccountResponse.parse({
-      username: data["username"] ?? data["email"] ?? username,
-      email: data["email"] ?? null,
-      first_name: data["first_name"] ?? data["firstName"] ?? null,
-      last_name: data["last_name"] ?? data["lastName"] ?? null,
-      account_id: String(data["id"] ?? data["account_id"] ?? data["userId"] ?? ""),
+      username,
+      email: null,
+      first_name: null,
+      last_name: null,
+      account_id: username,
       balances,
       connected: true,
     });
@@ -77,51 +84,64 @@ router.get("/payd/account", async (req, res): Promise<void> => {
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err, status }, "Failed to fetch Payd account");
-    if (status === 401) {
-      invalidateToken();
-      res.status(401).json({ error: "Authentication failed", message });
-      return;
-    }
     res.status(status).json({ error: "Failed to fetch account", message });
   }
 });
 
+// GET /api/payd/transactions — transaction history
 router.get("/payd/transactions", async (req, res): Promise<void> => {
   try {
     const parsed = GetTransactionsQueryParams.safeParse(req.query);
     const page = parsed.success ? (parsed.data.page ?? 1) : 1;
     const limit = parsed.success ? (parsed.data.limit ?? 20) : 20;
+    const username = getAccountUsername();
 
-    let rawData: unknown;
+    let rawItems: unknown[] = [];
+    let total = 0;
+
     try {
-      rawData = await paydGet("/v2/transactions", { page, limit, per_page: limit });
+      const rawData = await paydGet<Record<string, unknown>>(
+        `/api/v1/accounts/${username}/history`,
+        { page, limit, per_page: limit },
+      );
+      const items = rawData["transactions"] ?? rawData["data"] ?? rawData["items"] ?? rawData;
+      rawItems = Array.isArray(items) ? items : [];
+      total = Number(rawData["total"] ?? rawData["count"] ?? rawItems.length);
     } catch {
-      rawData = await paydGet("/v1/transactions", { page, limit, per_page: limit });
+      logger.warn("History endpoint not found, trying alternative");
     }
 
-    req.log.debug({ rawData }, "Payd transactions raw response");
+    req.log.debug({ count: rawItems.length }, "Payd transactions raw response");
 
-    const data = rawData as Record<string, unknown>;
-    const items = (data["transactions"] ?? data["data"] ?? data["items"] ?? data ?? []) as unknown[];
-    const txList = Array.isArray(items) ? items : [];
-
-    const transactions = txList.map((t, i) => {
+    const transactions = rawItems.map((t, i) => {
       const tx = t as Record<string, unknown>;
       return {
-        id: String(tx["id"] ?? tx["transaction_id"] ?? tx["reference"] ?? i),
+        id: String(tx["id"] ?? tx["code"] ?? tx["transaction_reference"] ?? tx["reference"] ?? i),
         type: String(tx["type"] ?? tx["transaction_type"] ?? "unknown"),
         amount: Number(tx["amount"] ?? 0),
-        currency: String(tx["currency"] ?? "KES"),
-        status: String(tx["status"] ?? "unknown"),
+        currency: String(tx["currency"] ?? tx["billing_currency"] ?? "KES"),
+        status: String(
+          (tx["transaction_details"] as Record<string, unknown>)?.["status"] ??
+            tx["status"] ??
+            "unknown",
+        ),
         narration: (tx["narration"] ?? tx["description"] ?? tx["note"] ?? null) as string | null,
-        created_at: String(tx["created_at"] ?? tx["createdAt"] ?? tx["date"] ?? new Date().toISOString()),
-        reference: (tx["reference"] ?? tx["transaction_reference"] ?? null) as string | null,
-        channel: (tx["channel"] ?? tx["payment_method"] ?? null) as string | null,
-        phone_number: (tx["phone_number"] ?? tx["msisdn"] ?? null) as string | null,
+        created_at: String(tx["created_at"] ?? tx["createdAt"] ?? new Date().toISOString()),
+        reference: (tx["code"] ?? tx["transaction_reference"] ?? tx["reference"] ?? null) as
+          | string
+          | null,
+        channel: (
+          (tx["transaction_details"] as Record<string, unknown>)?.["channel"] ??
+          tx["channel"] ??
+          null
+        ) as string | null,
+        phone_number: (
+          (tx["transaction_details"] as Record<string, unknown>)?.["phone_number"] ??
+          tx["phone_number"] ??
+          null
+        ) as string | null,
       };
     });
-
-    const total = Number(data["total"] ?? data["count"] ?? transactions.length);
 
     const result = GetTransactionsResponse.parse({ transactions, total, page, limit });
     res.json(result);
@@ -132,6 +152,7 @@ router.get("/payd/transactions", async (req, res): Promise<void> => {
   }
 });
 
+// POST /api/payd/payin — M-Pesa STK push collection
 router.post("/payd/payin", async (req, res): Promise<void> => {
   try {
     const parsed = InitiatePayinBody.safeParse(req.body);
@@ -141,34 +162,28 @@ router.post("/payd/payin", async (req, res): Promise<void> => {
     }
 
     const { phone_number, amount, currency = "KES", channel = "MPESA", narration } = parsed.data;
+    const username = getAccountUsername();
+    const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
-    let rawData: unknown;
-    try {
-      rawData = await paydPost("/v1/sasapay/top-up", {
-        phone_number,
-        amount,
-        currency,
-        channel,
-        narration,
-      });
-    } catch {
-      rawData = await paydPost("/v2/payments/payin", {
-        phone_number,
-        amount,
-        currency,
-        channel,
-        narration,
-      });
-    }
+    const rawData = await paydPost<Record<string, unknown>>("/api/v2/payments", {
+      username,
+      channel,
+      amount,
+      phone_number,
+      narration: narration ?? "Payment",
+      currency,
+      callback_url: callbackUrl,
+    });
 
     req.log.info({ rawData }, "Payd payin response");
 
-    const data = rawData as Record<string, unknown>;
     const result = InitiatePayinResponse.parse({
-      success: data["success"] !== false && data["status"] !== "failed",
-      reference: (data["reference"] ?? data["transaction_reference"] ?? data["checkout_request_id"] ?? null) as string | null,
-      message: String(data["message"] ?? data["description"] ?? "Payin initiated"),
-      transaction_reference: (data["transaction_reference"] ?? data["reference"] ?? null) as string | null,
+      success: rawData["success"] !== false && rawData["status"] !== "failed",
+      reference: (rawData["transaction_reference"] ?? rawData["trackingId"] ?? null) as
+        | string
+        | null,
+      message: String(rawData["message"] ?? rawData["description"] ?? "Payin initiated"),
+      transaction_reference: (rawData["transaction_reference"] ?? null) as string | null,
     });
 
     res.json(result);
@@ -179,6 +194,7 @@ router.post("/payd/payin", async (req, res): Promise<void> => {
   }
 });
 
+// POST /api/payd/payout — M-Pesa withdrawal
 router.post("/payd/payout", async (req, res): Promise<void> => {
   try {
     const parsed = InitiatePayoutBody.safeParse(req.body);
@@ -187,43 +203,27 @@ router.post("/payd/payout", async (req, res): Promise<void> => {
       return;
     }
 
-    const {
+    const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } =
+      parsed.data;
+    const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
+
+    const rawData = await paydPost<Record<string, unknown>>("/api/v2/withdrawal", {
       phone_number,
       amount,
-      currency = "KES",
-      network_code = "MPESA",
-      narration,
-      account_id,
-    } = parsed.data;
-
-    let rawData: unknown;
-    try {
-      rawData = await paydPost("/v1/sasapay/withdrawal", {
-        phone_number,
-        amount,
-        currency,
-        network_code,
-        narration,
-        account_id,
-      });
-    } catch {
-      rawData = await paydPost("/v2/payments/payout", {
-        phone_number,
-        amount,
-        currency,
-        network_code,
-        narration,
-        account_id,
-      });
-    }
+      narration: narration ?? "Withdrawal",
+      callback_url: callbackUrl,
+      channel: network_code,
+      currency,
+    });
 
     req.log.info({ rawData }, "Payd payout response");
 
-    const data = rawData as Record<string, unknown>;
     const result = InitiatePayoutResponse.parse({
-      success: data["success"] !== false && data["status"] !== "failed",
-      reference: (data["reference"] ?? data["transaction_reference"] ?? null) as string | null,
-      message: String(data["message"] ?? data["description"] ?? "Payout initiated"),
+      success: rawData["success"] !== false && rawData["status"] !== "failed",
+      reference: (rawData["correlator_id"] ?? rawData["transaction_reference"] ?? null) as
+        | string
+        | null,
+      message: String(rawData["message"] ?? rawData["description"] ?? "Payout initiated"),
     });
 
     res.json(result);
@@ -234,34 +234,35 @@ router.post("/payd/payout", async (req, res): Promise<void> => {
   }
 });
 
+// GET /api/payd/summary — dashboard summary derived from balances
 router.get("/payd/summary", async (req, res): Promise<void> => {
   try {
-    let transactions: Array<Record<string, unknown>> = [];
+    const username = getAccountUsername();
 
+    let transactions: unknown[] = [];
     try {
-      const rawData = await paydGet<Record<string, unknown>>("/v2/transactions", {
-        page: 1,
-        limit: 100,
-        per_page: 100,
-      });
-      const items = (rawData["transactions"] ?? rawData["data"] ?? rawData["items"] ?? rawData ?? []) as unknown[];
-      transactions = Array.isArray(items) ? (items as Array<Record<string, unknown>>) : [];
-    } catch (err) {
-      logger.warn({ err }, "Could not fetch transactions for summary, using empty data");
+      const rawData = await paydGet<Record<string, unknown>>(
+        `/api/v1/accounts/${username}/history`,
+        { page: 1, limit: 100, per_page: 100 },
+      );
+      const items = rawData["transactions"] ?? rawData["data"] ?? rawData["items"] ?? rawData;
+      transactions = Array.isArray(items) ? items : [];
+    } catch {
+      logger.warn("Could not fetch transaction history for summary");
     }
 
-    const payins = transactions.filter(
+    type TxRecord = Record<string, unknown>;
+    const payins = (transactions as TxRecord[]).filter(
       (t) =>
-        String(t["type"] ?? "").toLowerCase().includes("payin") ||
-        String(t["type"] ?? "").toLowerCase().includes("top") ||
-        String(t["type"] ?? "").toLowerCase().includes("deposit") ||
-        String(t["type"] ?? "").toLowerCase().includes("credit")
+        String(t["type"] ?? "")
+          .toLowerCase()
+          .match(/payin|receipt|deposit|credit|top/),
     );
-    const payouts = transactions.filter(
+    const payouts = (transactions as TxRecord[]).filter(
       (t) =>
-        String(t["type"] ?? "").toLowerCase().includes("payout") ||
-        String(t["type"] ?? "").toLowerCase().includes("withdrawal") ||
-        String(t["type"] ?? "").toLowerCase().includes("debit")
+        String(t["type"] ?? "")
+          .toLowerCase()
+          .match(/payout|withdrawal|debit/),
     );
 
     const result = GetSummaryResponse.parse({
@@ -279,6 +280,13 @@ router.get("/payd/summary", async (req, res): Promise<void> => {
     req.log.error({ err }, "Failed to fetch Payd summary");
     res.status(status).json({ error: "Failed to fetch summary", message });
   }
+});
+
+// POST /api/webhook/payd — receive Payd transaction webhooks
+router.post("/webhook/payd", (req, res): void => {
+  const payload = req.body as Record<string, unknown>;
+  logger.info({ payload }, "Payd webhook received");
+  res.status(200).json({ received: true });
 });
 
 export default router;

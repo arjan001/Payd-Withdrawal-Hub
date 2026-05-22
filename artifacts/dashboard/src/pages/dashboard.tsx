@@ -38,7 +38,7 @@ export default function Dashboard() {
       <header>
         <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
         <p className="text-muted-foreground mt-1 font-mono text-sm">
-          {account ? `${account.account_id} • ${account.email}` : <Skeleton className="h-4 w-48" />}
+          {account ? `${account.username}${account.email ? ` • ${account.email}` : ""}` : <Skeleton className="h-4 w-48" />}
         </p>
       </header>
 
