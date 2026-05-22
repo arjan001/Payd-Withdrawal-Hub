@@ -1,0 +1,129 @@
+Payouts
+Kenya Payouts (M-Pesa)
+Send money to M-Pesa users in Kenya. When you initiate a withdrawal, the recipient receives the funds directly to their M-Pesa wallet.
+
+How it works
+1
+You send a POST request with the recipient's phone number and amount
+2
+Payd processes the withdrawal and sends the funds via M-Pesa
+3
+The recipient receives the funds in their M-Pesa wallet
+4
+Payd sends a webhook to your callback_url with the final result
+Endpoint
+POST
+/api/v2/withdrawal
+Note: Kenya payouts use the /withdrawal endpoint, distinct from the /payments endpoint used for collections and other payout types.
+
+Request parameters
+Body Parameters (JSON)
+PARAMETER	TYPE	REQUIRED	DESCRIPTION
+phone_number	string	Required	Recipient Kenyan phone number starting with 0 (must be exactly 10 digits)
+amount	number	Required	Amount in KES to send. Minimum 10, maximum 250,000
+narration	string	Required	A reason/description for the withdrawal
+callback_url	string	Required	The URL to which Payd will send a webhook with the transaction status once updated
+channel	string	Required	Must be "MPESA"
+currency	string	Required	Must be "KES"
+wallet_type	string	Optional	"local" (default) or "USD". When set to "USD", the payout is funded from your USD wallet. The amount is still specified in KES and Payd converts from your USD balance automatically
+Phone number format The phone number must be a valid Kenyan number starting with 0 and exactly 10 digits long. For example: 0700000000
+Request examples
+cURL
+JavaScript
+Python
+PHP
+bash
+Copy
+curl -X POST https://api.payd.money/api/v2/withdrawal \
+  -u 'YOUR_API_USERNAME:YOUR_API_PASSWORD' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "phone_number": "0700000000",
+    "amount": 100,
+    "narration": "Withdrawal request",
+    "callback_url": "https://your-server.com/callback",
+    "channel": "MPESA",
+    "currency": "KES"
+  }'
+Responses
+Success Response
+The withdrawal request was accepted. The correlator_id is the Payd transaction reference. Wait for the webhook to confirm the final status.
+
+200 OK
+Copy
+{
+  "success": true,
+  "correlator_id": "9BD141203407eW",
+  "message": "Transaction request sent successfully",
+  "status": "SUCCESS",
+  "channel": "",
+  "amount": 0
+}
+Error Response
+The request failed validation. Returns an error status code (e.g. 400).
+
+400 Bad Request
+Copy
+{
+  "status": 400,
+  "success": false,
+  "message": "number (7458969711) is not valid kenyan number"
+}
+Webhook response
+After the withdrawal is processed, Payd sends a POST request to your callback_url. The result_code and status together are the source of truth for the transaction outcome.
+
+OUTCOME	RESULT_CODE	STATUS
+Success	0	"success"
+Failed	1	"failed"
+Withdrawal completed
+The third_party_trans_id is the M-Pesa transaction receipt number from Safaricom. The phone_number is partially masked in the webhook for security.
+
+Success Callback
+Copy
+{
+  "transaction_reference": "9BD141338537eW",
+  "phone_number": "2547*****971",
+  "result_code": 0,
+  "remarks": "Transaction processed successfully with reference: [UB9GC67IGU]",
+  "third_party_trans_id": "UB9GC67IGU",
+  "amount": 100,
+  "transaction_date": "2026-02-09 14:13:41.098869624 +0000 UTC m=+5792.010255964",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "success": true,
+  "status": "success"
+}
+Withdrawal failed
+Failure Callback
+Copy
+{
+  "transaction_reference": "9BD104311505eR",
+  "phone_number": "2547*****971",
+  "result_code": 1,
+  "remarks": "Transaction failed with message: [Request Cancelled by user.]",
+  "transaction_date": "November",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "success": false,
+  "status": "failed"
+}
+Important The initial API response only confirms the withdrawal request was accepted. Always wait for the webhook callback to determine the final outcome. Check both result_code and status: result_code: 0 + status: "success" means the transaction succeeded.
+Limits
+LIMIT	VALUE
+Minimum amount	KES 10
+Maximum amount	KES 250,000
+Currency	KES only
+RELATED
+🌍
+Pan-African Payouts
+Send money across Africa
+
+🏪
+Merchant Payouts
+Pay to Paybill and Till numbers
+
+Payd
+© 2026 Payd. All rights reserved.
+payd.money
+Dashboard
+Support

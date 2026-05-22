@@ -1,0 +1,127 @@
+Collections
+Kenya Payins (M-Pesa)
+Collect payments from M-Pesa users in Kenya using STK Push. When you initiate a payment, the customer receives a prompt on their phone to enter their M-Pesa PIN and authorize the transaction.
+
+How it works
+1
+You send a POST request with the customer's phone number and amount
+2
+Payd sends an STK push to the customer's phone
+3
+Customer enters their M-Pesa PIN to complete the payment
+4
+Payd sends a webhook to your callback_url with the final result
+Endpoint
+POST
+/api/v2/payments
+Request parameters
+Body Parameters (JSON)
+PARAMETER	TYPE	REQUIRED	DESCRIPTION
+username	string	Required	Your Payd account username
+channel	string	Required	Payment channel. Currently only "MPESA" is available
+amount	number	Required	Amount in KES. Minimum 10, maximum 250,000
+phone_number	string	Required	Kenyan phone number starting with 0 (must be exactly 10 digits)
+narration	string	Required	Reason for the collection, shown to the customer
+currency	string	Required	Must be "KES" for Kenya payments
+callback_url	string	Required	URL where Payd will send the transaction webhook
+Phone number format The phone number must be a valid Kenyan number starting with 0 and exactly 10 digits long. For example: 0700000000
+Request examples
+cURL
+JavaScript
+Python
+PHP
+bash
+Copy
+curl -X POST https://api.payd.money/api/v2/payments \
+  -u 'YOUR_API_USERNAME:YOUR_API_PASSWORD' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "username": "your_payd_username",
+    "channel": "MPESA",
+    "amount": 10,
+    "phone_number": "0700000000",
+    "narration": "Payment for goods",
+    "currency": "KES",
+    "callback_url": "https://your-server.com/callback"
+  }'
+Responses
+Success Response
+The STK push was sent to the customer's phone. They must now enter their M-Pesa PIN to complete the payment. The success: true here only means the request was accepted - wait for the webhook for the final outcome.
+
+200 OK
+Copy
+{
+  "payment_method": "mobile",
+  "status": "SUCCESS",
+  "transaction_reference": "9BD103350408eR",
+  "success": true,
+  "message": "Processed successfully",
+  "trackingId": "",
+  "reference": "",
+  "result": null
+}
+Error Response
+The request failed validation. Returns an error status code (e.g. 400).
+
+400 Bad Request
+Copy
+{
+  "status": 400,
+  "success": false,
+  "message": "number (7458969711) is not valid kenyan number"
+}
+Webhook response
+After the customer interacts with the STK push, Payd sends a POST request to your callback_url with the final transaction status. The result_code and status together are the source of truth for the transaction outcome.
+
+Payment completed
+The third_party_trans_id is the M-Pesa transaction receipt number from Safaricom.
+
+Success Callback
+Copy
+{
+  "transaction_reference": "9BD103739849eR",
+  "result_code": 0,
+  "remarks": "Successfully processes m-pesa transaction",
+  "third_party_trans_id": "UB9C46DH3Q",
+  "amount": 10,
+  "transaction_date": "2026-02-09 10:37:50.286784611 +0000 UTC m=+448005.605396772",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "user_id": "0de616fc-61f7-46e2-aa36-4c9eda58ed37",
+  "customer_name": "",
+  "success": true,
+  "web3_transaction_reference": ""
+}
+Payment failed / cancelled
+Failure Callback
+Copy
+{
+  "transaction_reference": "9BD104311505eR",
+  "result_code": 1,
+  "remarks": "Transaction failed with message: [Request Cancelled by user.]",
+  "transaction_date": "November",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "success": false,
+  "status": ""
+}
+Important The initial API response only confirms the STK push was sent. Always wait for the webhook callback to determine the final outcome. Check result_code and status: result_code: 0 + status: "success" means the transaction succeeded.
+Limits
+LIMIT	VALUE
+Minimum amount	KES 10
+Maximum amount	KES 250,000
+Currency	KES only
+RELATED
+🌍
+Pan-African Payins
+Collect payments across Africa
+
+💳
+Card Payments
+Accept Visa and Mastercard
+
+Payd
+© 2026 Payd. All rights reserved.
+payd.money
+Dashboard
+Support

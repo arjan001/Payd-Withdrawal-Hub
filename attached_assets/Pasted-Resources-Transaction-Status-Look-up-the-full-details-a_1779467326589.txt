@@ -1,0 +1,97 @@
+Resources
+Transaction Status
+Look up the full details and current status of any Payd transaction using its transaction reference.
+
+Endpoint
+GET
+/api/v1/status/{transaction_reference}
+Replace {transaction_reference} with the Payd transaction reference returned from the original API call or webhook (e.g., 9BD103350408eR).
+
+Reference suffixes
+The suffix of a Payd transaction reference indicates the transaction type:
+
+SUFFIX	TRANSACTION TYPE	EXAMPLE
+eR	Receipt (payin/collection)	9BD103350408eR
+eW	Withdrawal (payout)	9BD090722409eW
+eS	Payd-to-Payd transfer	9BD12041887.eS
+eT	Top-up	9BD110045632eT
+Request examples
+cURL
+JavaScript
+Python
+bash
+Copy
+curl -G https://api.payd.money/api/v1/status/9BD103350408eR \
+  -u 'YOUR_API_USERNAME:YOUR_API_PASSWORD'
+Response
+200 OK
+Copy
+{
+  "id": "559084cb-3ab0-4131-a161-9b08231a60d3",
+  "account_id": "",
+  "billing_currency": "",
+  "currency": "KES",
+  "code": "9BD103350408eR",
+  "conversion_rate": 0,
+  "amount": 10000,
+  "billing_currency_amount": 0,
+  "balance": 4109741.52,
+  "type": "receipt",
+  "transaction_details": {
+    "payer": "+254700000000",
+    "merchant_id": "9BD103350408eR:UBC7G6FFA3",
+    "phone_number": "+254700000000",
+    "processed_at": {
+      "seconds": 1770888820,
+      "nanos": 350838138
+    },
+    "reason": "Successfully processes m-pesa transaction",
+    "channel": "mobile",
+    "account_number": "9654793f-c567-439f-9403-3dafaf6eaf81",
+    "status": "success",
+    "receiver": "Your Business Name",
+    "email_address": "you@example.com"
+  },
+  "transaction_category": "fiat",
+  "user_id": "",
+  "request_metadata": null,
+  "created_at": "2026-02-12T09:33:40.360254Z"
+}
+Response fields
+FIELD	TYPE	DESCRIPTION
+id	string	Internal unique identifier (UUID)
+code	string	The Payd transaction reference
+currency	string	Transaction currency (e.g., "KES", "NGN")
+amount	number	Transaction amount
+balance	number	Account balance after the transaction
+type	string	Transaction type: "receipt", "withdrawal", "transfer", or "topup"
+transaction_category	string	Category: "fiat" for local currency transactions
+conversion_rate	number	FX conversion rate applied (0 if same currency)
+transaction_details	object	Detailed transaction info (see below)
+created_at	string	ISO 8601 timestamp of when the transaction was created
+transaction_details
+FIELD	TYPE	DESCRIPTION
+status	string	Transaction status: "success" or "failed"
+payer	string	Phone number or identifier of the payer
+receiver	string	Name of the receiving party
+phone_number	string	Phone number involved in the transaction
+merchant_id	string	Payd reference combined with the third-party transaction ID
+reason	string	Human-readable outcome description
+channel	string	Payment channel (e.g., "mobile", "bank", "card")
+processed_at	object	Timestamp with seconds (Unix epoch) and nanos
+email_address	string	Email address associated with the account
+account_number	string	Internal account identifier
+RELATED
+📖
+Core Concepts
+Transaction references and status
+
+🔔
+Webhooks
+Real-time transaction notifications
+
+Payd
+© 2026 Payd. All rights reserved.
+payd.money
+Dashboard
+Support

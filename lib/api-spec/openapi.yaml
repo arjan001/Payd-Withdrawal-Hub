@@ -3,20 +3,22 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Payd Money Dashboard API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: payd
+    description: Payd Money operations
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +26,143 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /payd/account:
+    get:
+      operationId: getAccount
+      tags: [payd]
+      summary: Get account info and balances
+      responses:
+        "200":
+          description: Account and balance info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountInfo"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /payd/transactions:
+    get:
+      operationId: getTransactions
+      tags: [payd]
+      summary: Get transaction history
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionList"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /payd/payin:
+    post:
+      operationId: initiatePayin
+      tags: [payd]
+      summary: Initiate a payin (deposit via M-Pesa STK push)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PayinInput"
+      responses:
+        "200":
+          description: Payin initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayinResult"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /payd/payout:
+    post:
+      operationId: initiatePayout
+      tags: [payd]
+      summary: Initiate a payout (withdrawal to mobile money)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PayoutInput"
+      responses:
+        "200":
+          description: Payout initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayoutResult"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /payd/summary:
+    get:
+      operationId: getSummary
+      tags: [payd]
+      summary: Get dashboard summary stats (total in, total out, recent counts)
+      responses:
+        "200":
+          description: Summary stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +173,191 @@ components:
       required:
         - status
 
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: ["string", "null"]
+      required:
+        - error
+
+    Balance:
+      type: object
+      properties:
+        currency:
+          type: string
+        available_balance:
+          type: number
+        ledger_balance:
+          type: number
+      required:
+        - currency
+        - available_balance
+        - ledger_balance
+
+    AccountInfo:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: ["string", "null"]
+        first_name:
+          type: ["string", "null"]
+        last_name:
+          type: ["string", "null"]
+        account_id:
+          type: ["string", "null"]
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/Balance"
+        connected:
+          type: boolean
+      required:
+        - username
+        - connected
+        - balances
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+        narration:
+          type: ["string", "null"]
+        created_at:
+          type: string
+        reference:
+          type: ["string", "null"]
+        channel:
+          type: ["string", "null"]
+        phone_number:
+          type: ["string", "null"]
+      required:
+        - id
+        - type
+        - amount
+        - currency
+        - status
+        - created_at
+
+    TransactionList:
+      type: object
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - transactions
+        - total
+        - page
+        - limit
+
+    PayinInput:
+      type: object
+      properties:
+        phone_number:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+          default: KES
+        channel:
+          type: string
+          default: MPESA
+        narration:
+          type: ["string", "null"]
+      required:
+        - phone_number
+        - amount
+
+    PayinResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        reference:
+          type: ["string", "null"]
+        message:
+          type: string
+        transaction_reference:
+          type: ["string", "null"]
+      required:
+        - success
+        - message
+
+    PayoutInput:
+      type: object
+      properties:
+        phone_number:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+          default: KES
+        network_code:
+          type: string
+          default: MPESA
+        narration:
+          type: ["string", "null"]
+        account_id:
+          type: ["string", "null"]
+      required:
+        - phone_number
+        - amount
+
+    PayoutResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        reference:
+          type: ["string", "null"]
+        message:
+          type: string
+      required:
+        - success
+        - message
+
+    DashboardSummary:
+      type: object
+      properties:
+        total_payin:
+          type: number
+        total_payout:
+          type: number
+        payin_count:
+          type: integer
+        payout_count:
+          type: integer
+        currency:
+          type: string
+        recent_activity_count:
+          type: integer
+      required:
+        - total_payin
+        - total_payout
+        - payin_count
+        - payout_count
+        - currency
+        - recent_activity_count
