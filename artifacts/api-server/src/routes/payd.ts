@@ -205,9 +205,11 @@ router.post("/payd/payout", async (req, res): Promise<void> => {
 
     const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } =
       parsed.data;
+    const username = getAccountUsername();
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
     const rawData = await paydPost<Record<string, unknown>>("/api/v2/withdrawal", {
+      username,
       phone_number,
       amount,
       narration: narration ?? "Withdrawal",

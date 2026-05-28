@@ -55,8 +55,10 @@ _Populate as you build — explicit user instructions worth remembering across s
 - Dashboard must be **rebuilt** after any frontend change: `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build`
 - Then **restart the API server workflow** so it serves the new `dist/public/` files.
 - The `PAYD_USERNAME` and `PAYD_PASSWORD` are API key credentials (not your Payd account login). Generated from Profile → API Keys in the Payd web app.
+- `PAYD_ACCOUNT_USERNAME` is the **Payd profile username** (e.g. `techlink`) — distinct from the API key username. It must appear in payment request bodies as the `username` field. Without it, Payd returns HTTP 415 "error getting user".
 - `PAYD_API_SECRET` is currently unused — Payd's Basic Auth only needs username + password.
 - Phone numbers for M-Pesa must start with `0` and be exactly 10 digits (e.g. `0712345678`).
+- **Payouts return "Unable to process payouts"** — this is a Payd account-side restriction (KYC / payout permission not yet enabled on the account), not a code issue. The request is being sent correctly with all required fields.
 
 ## Pointers
 
