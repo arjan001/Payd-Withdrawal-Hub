@@ -8,23 +8,34 @@ import {
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowDownLeft, ArrowUpRight, Activity, Wallet, ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ArrowDownLeft, ArrowUpRight, Activity, Wallet, ArrowRight, RefreshCw } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 
+const REFETCH_INTERVAL = 30_000;
+
 export default function Dashboard() {
-  const { data: summary, isLoading: loadingSummary } = useGetSummary({
-    query: { queryKey: getGetSummaryQueryKey() }
+  const { data: summary, isLoading: loadingSummary, refetch: refetchSummary } = useGetSummary({
+    query: { queryKey: getGetSummaryQueryKey(), refetchInterval: REFETCH_INTERVAL }
   });
   
-  const { data: account, isLoading: loadingAccount } = useGetAccount({
-    query: { queryKey: getGetAccountQueryKey() }
+  const { data: account, isLoading: loadingAccount, refetch: refetchAccount } = useGetAccount({
+    query: { queryKey: getGetAccountQueryKey(), refetchInterval: REFETCH_INTERVAL }
   });
 
-  const { data: transactionsData, isLoading: loadingTransactions } = useGetTransactions(
+  const { data: transactionsData, isLoading: loadingTransactions, refetch: refetchTx } = useGetTransactions(
     { limit: 5 },
-    { query: { queryKey: getGetTransactionsQueryKey({ limit: 5 }) } }
+    { query: { queryKey: getGetTransactionsQueryKey({ limit: 5 }), refetchInterval: REFETCH_INTERVAL } }
   );
+
+  const isRefreshing = loadingAccount || loadingSummary;
+
+  function handleRefresh() {
+    void refetchAccount();
+    void refetchSummary();
+    void refetchTx();
+  }
 
   const formatCurrency = (amount: number, currency: string = "KES") => {
     return new Intl.NumberFormat('en-KE', {
@@ -35,11 +46,23 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <header>
-        <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
-        <p className="text-muted-foreground mt-1 font-mono text-sm">
-          {account ? `${account.username}${account.email ? ` • ${account.email}` : ""}` : <Skeleton className="h-4 w-48" />}
-        </p>
+      <header className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
+          <p className="text-muted-foreground mt-1 font-mono text-sm">
+            {account ? `${account.username}${account.email ? ` • ${account.email}` : ""}` : <Skeleton className="h-4 w-48" />}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="gap-2"
+        >
+          <RefreshCw size={14} className={isRefreshing ? "animate-spin" : ""} />
+          Refresh
+        </Button>
       </header>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
