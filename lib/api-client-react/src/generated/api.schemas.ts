@@ -95,6 +95,35 @@ export interface PayoutResult {
   message: string;
 }
 
+export interface PayHeroWallet {
+  channel_id: number;
+  /** @nullable */
+  channel_name?: string | null;
+  /** @nullable */
+  payment_channel_balance?: number | null;
+  /** @nullable */
+  service_wallet_balance?: number | null;
+  currency: string;
+  connected: boolean;
+}
+
+export interface PayHeroWithdrawInput {
+  phone_number: string;
+  amount: number;
+  network_code?: string;
+  /** @nullable */
+  external_reference?: string | null;
+}
+
+export interface PayHeroWithdrawResult {
+  success: boolean;
+  /** @nullable */
+  reference?: string | null;
+  message: string;
+  /** @nullable */
+  status?: string | null;
+}
+
 export interface DashboardSummary {
   total_payin: number;
   total_payout: number;

@@ -25,6 +25,9 @@ import type {
   DashboardSummary,
   GetTransactionsParams,
   HealthStatus,
+  PayHeroWallet,
+  PayHeroWithdrawInput,
+  PayHeroWithdrawResult,
   PayinInput,
   PayinResult,
   PayoutInput,
@@ -422,6 +425,154 @@ export const useInitiatePayout = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getInitiatePayoutMutationOptions(options));
+    }
+
+export const getGetPayheroWalletUrl = () => {
+
+
+
+
+  return `/api/payhero/wallet`
+}
+
+/**
+ * @summary Get PayHero wallet balances
+ */
+export const getPayheroWallet = async ( options?: RequestInit): Promise<PayHeroWallet> => {
+
+  return customFetch<PayHeroWallet>(getGetPayheroWalletUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPayheroWalletQueryKey = () => {
+    return [
+    `/api/payhero/wallet`
+    ] as const;
+    }
+
+
+export const getGetPayheroWalletQueryOptions = <TData = Awaited<ReturnType<typeof getPayheroWallet>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPayheroWallet>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPayheroWalletQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPayheroWallet>>> = ({ signal }) => getPayheroWallet({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPayheroWallet>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPayheroWalletQueryResult = NonNullable<Awaited<ReturnType<typeof getPayheroWallet>>>
+export type GetPayheroWalletQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get PayHero wallet balances
+ */
+
+export function useGetPayheroWallet<TData = Awaited<ReturnType<typeof getPayheroWallet>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPayheroWallet>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPayheroWalletQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getInitiatePayheroWithdrawUrl = () => {
+
+
+
+
+  return `/api/payhero/withdraw`
+}
+
+/**
+ * @summary Withdraw from PayHero wallet to mobile money
+ */
+export const initiatePayheroWithdraw = async (payHeroWithdrawInput: PayHeroWithdrawInput, options?: RequestInit): Promise<PayHeroWithdrawResult> => {
+
+  return customFetch<PayHeroWithdrawResult>(getInitiatePayheroWithdrawUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      payHeroWithdrawInput,)
+  }
+);}
+
+
+
+
+export const getInitiatePayheroWithdrawMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof initiatePayheroWithdraw>>, TError,{data: BodyType<PayHeroWithdrawInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof initiatePayheroWithdraw>>, TError,{data: BodyType<PayHeroWithdrawInput>}, TContext> => {
+
+const mutationKey = ['initiatePayheroWithdraw'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof initiatePayheroWithdraw>>, {data: BodyType<PayHeroWithdrawInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  initiatePayheroWithdraw(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InitiatePayheroWithdrawMutationResult = NonNullable<Awaited<ReturnType<typeof initiatePayheroWithdraw>>>
+    export type InitiatePayheroWithdrawMutationBody = BodyType<PayHeroWithdrawInput>
+    export type InitiatePayheroWithdrawMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Withdraw from PayHero wallet to mobile money
+ */
+export const useInitiatePayheroWithdraw = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof initiatePayheroWithdraw>>, TError,{data: BodyType<PayHeroWithdrawInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof initiatePayheroWithdraw>>,
+        TError,
+        {data: BodyType<PayHeroWithdrawInput>},
+        TContext
+      > => {
+      return useMutation(getInitiatePayheroWithdrawMutationOptions(options));
     }
 
 export const getGetSummaryUrl = () => {

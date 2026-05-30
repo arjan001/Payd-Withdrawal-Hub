@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: payd
     description: Payd Money operations
+  - name: payhero
+    description: PayHero wallet operations
 
 paths:
   /healthz:
@@ -131,6 +133,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PayoutResult"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /payhero/wallet:
+    get:
+      operationId: getPayheroWallet
+      tags: [payhero]
+      summary: Get PayHero wallet balances
+      responses:
+        "200":
+          description: Wallet balance info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayHeroWallet"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /payhero/withdraw:
+    post:
+      operationId: initiatePayheroWithdraw
+      tags: [payhero]
+      summary: Withdraw from PayHero wallet to mobile money
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PayHeroWithdrawInput"
+      responses:
+        "200":
+          description: Withdrawal initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayHeroWithdrawResult"
         "400":
           description: Validation error
           content:
@@ -335,6 +393,57 @@ components:
           type: ["string", "null"]
         message:
           type: string
+      required:
+        - success
+        - message
+
+    PayHeroWallet:
+      type: object
+      properties:
+        channel_id:
+          type: integer
+        channel_name:
+          type: ["string", "null"]
+        payment_channel_balance:
+          type: ["number", "null"]
+        service_wallet_balance:
+          type: ["number", "null"]
+        currency:
+          type: string
+        connected:
+          type: boolean
+      required:
+        - channel_id
+        - currency
+        - connected
+
+    PayHeroWithdrawInput:
+      type: object
+      properties:
+        phone_number:
+          type: string
+        amount:
+          type: number
+        network_code:
+          type: string
+          default: "63902"
+        external_reference:
+          type: ["string", "null"]
+      required:
+        - phone_number
+        - amount
+
+    PayHeroWithdrawResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        reference:
+          type: ["string", "null"]
+        message:
+          type: string
+        status:
+          type: ["string", "null"]
       required:
         - success
         - message

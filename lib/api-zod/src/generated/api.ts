@@ -109,6 +109,39 @@ export const InitiatePayoutResponse = zod.object({
 
 
 /**
+ * @summary Get PayHero wallet balances
+ */
+export const GetPayheroWalletResponse = zod.object({
+  "channel_id": zod.number(),
+  "channel_name": zod.string().nullish(),
+  "payment_channel_balance": zod.number().nullish(),
+  "service_wallet_balance": zod.number().nullish(),
+  "currency": zod.string(),
+  "connected": zod.boolean()
+})
+
+
+/**
+ * @summary Withdraw from PayHero wallet to mobile money
+ */
+export const initiatePayheroWithdrawBodyNetworkCodeDefault = `63902`;
+
+export const InitiatePayheroWithdrawBody = zod.object({
+  "phone_number": zod.string(),
+  "amount": zod.number(),
+  "network_code": zod.string().default(initiatePayheroWithdrawBodyNetworkCodeDefault),
+  "external_reference": zod.string().nullish()
+})
+
+export const InitiatePayheroWithdrawResponse = zod.object({
+  "success": zod.boolean(),
+  "reference": zod.string().nullish(),
+  "message": zod.string(),
+  "status": zod.string().nullish()
+})
+
+
+/**
  * @summary Get dashboard summary stats (total in, total out, recent counts)
  */
 export const GetSummaryResponse = zod.object({

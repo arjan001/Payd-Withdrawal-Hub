@@ -9,6 +9,7 @@ import Dashboard from "@/pages/dashboard";
 import Payin from "@/pages/payin";
 import Payout from "@/pages/payout";
 import Transactions from "@/pages/transactions";
+import PayHero from "@/pages/payhero";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ function Router() {
         <Route path="/payin" component={Payin} />
         <Route path="/payout" component={Payout} />
         <Route path="/transactions" component={Transactions} />
+        <Route path="/payhero" component={PayHero} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
