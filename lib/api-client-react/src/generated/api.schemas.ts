@@ -124,6 +124,86 @@ export interface PayHeroWithdrawResult {
   status?: string | null;
 }
 
+export type MerchantPayoutInputBusinessType = typeof MerchantPayoutInputBusinessType[keyof typeof MerchantPayoutInputBusinessType];
+
+
+export const MerchantPayoutInputBusinessType = {
+  paybill: 'paybill',
+  till: 'till',
+} as const;
+
+export interface MerchantPayoutInput {
+  amount: number;
+  currency?: string;
+  phone_number: string;
+  narration: string;
+  business_type?: MerchantPayoutInputBusinessType;
+  business_account: string;
+  /** @nullable */
+  business_number?: string | null;
+  /** @nullable */
+  wallet_type?: string | null;
+}
+
+export interface MerchantPayoutResult {
+  success: boolean;
+  /** @nullable */
+  correlator_id?: string | null;
+  message: string;
+  /** @nullable */
+  status?: string | null;
+}
+
+export interface P2PTransferInput {
+  receiver_username: string;
+  amount: number;
+  narration: string;
+  phone_number: string;
+  /** @nullable */
+  wallet_type?: string | null;
+}
+
+export interface P2PTransferResult {
+  success: boolean;
+  /** @nullable */
+  transaction_reference?: string | null;
+  message: string;
+}
+
+export interface TransactionStatusDetails {
+  /** @nullable */
+  status?: string | null;
+  /** @nullable */
+  payer?: string | null;
+  /** @nullable */
+  receiver?: string | null;
+  /** @nullable */
+  phone_number?: string | null;
+  /** @nullable */
+  channel?: string | null;
+  /** @nullable */
+  reason?: string | null;
+  /** @nullable */
+  merchant_id?: string | null;
+  /** @nullable */
+  account_number?: string | null;
+  /** @nullable */
+  email_address?: string | null;
+}
+
+export interface TransactionStatusResult {
+  id: string;
+  code: string;
+  currency: string;
+  amount: number;
+  balance: number;
+  type: string;
+  /** @nullable */
+  transaction_category?: string | null;
+  created_at: string;
+  transaction_details?: TransactionStatusDetails;
+}
+
 export interface DashboardSummary {
   total_payin: number;
   total_payout: number;

@@ -2,7 +2,7 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import NotFound from "@/pages/not-found";
 import Layout from "@/components/layout";
 import Dashboard from "@/pages/dashboard";
@@ -10,6 +10,8 @@ import Payin from "@/pages/payin";
 import Payout from "@/pages/payout";
 import Transactions from "@/pages/transactions";
 import PayHero from "@/pages/payhero";
+import Merchant from "@/pages/merchant";
+import P2P from "@/pages/p2p";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +31,8 @@ function Router() {
         <Route path="/payout" component={Payout} />
         <Route path="/transactions" component={Transactions} />
         <Route path="/payhero" component={PayHero} />
+        <Route path="/merchant" component={Merchant} />
+        <Route path="/p2p" component={P2P} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

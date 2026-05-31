@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { ReactNode } from "react";
-import { ArrowDownLeft, ArrowUpRight, LayoutDashboard, List, Activity, Wallet, Zap } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, LayoutDashboard, List, Activity, Wallet, Zap, Building2, Users } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -11,6 +11,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/payin", label: "Deposit (Payin)", icon: ArrowDownLeft },
     { href: "/payout", label: "Withdraw (Payout)", icon: ArrowUpRight },
+    { href: "/merchant", label: "Merchant Payment", icon: Building2 },
+    { href: "/p2p", label: "Send to Payd Member", icon: Users },
     { href: "/transactions", label: "Transactions", icon: List },
     { href: "/payhero", label: "PayHero", icon: Zap },
   ];

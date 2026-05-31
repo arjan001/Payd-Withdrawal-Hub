@@ -87,6 +87,79 @@ export const InitiatePayinResponse = zod.object({
 
 
 /**
+ * @summary Pay to a Paybill or Till number
+ */
+export const initiateMerchantPayoutBodyCurrencyDefault = `KES`;
+export const initiateMerchantPayoutBodyBusinessTypeDefault = `paybill`;
+
+export const InitiateMerchantPayoutBody = zod.object({
+  "amount": zod.number(),
+  "currency": zod.string().default(initiateMerchantPayoutBodyCurrencyDefault),
+  "phone_number": zod.string(),
+  "narration": zod.string(),
+  "business_type": zod.enum(['paybill', 'till']).default(initiateMerchantPayoutBodyBusinessTypeDefault),
+  "business_account": zod.string(),
+  "business_number": zod.string().nullish(),
+  "wallet_type": zod.string().nullish()
+})
+
+export const InitiateMerchantPayoutResponse = zod.object({
+  "success": zod.boolean(),
+  "correlator_id": zod.string().nullish(),
+  "message": zod.string(),
+  "status": zod.string().nullish()
+})
+
+
+/**
+ * @summary Send money to a fellow Payd member
+ */
+export const InitiateP2PTransferBody = zod.object({
+  "receiver_username": zod.string(),
+  "amount": zod.number(),
+  "narration": zod.string(),
+  "phone_number": zod.string(),
+  "wallet_type": zod.string().nullish()
+})
+
+export const InitiateP2PTransferResponse = zod.object({
+  "success": zod.boolean(),
+  "transaction_reference": zod.string().nullish(),
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Look up the status of a transaction by reference
+ */
+export const GetTransactionStatusParams = zod.object({
+  "reference": zod.coerce.string()
+})
+
+export const GetTransactionStatusResponse = zod.object({
+  "id": zod.string(),
+  "code": zod.string(),
+  "currency": zod.string(),
+  "amount": zod.number(),
+  "balance": zod.number(),
+  "type": zod.string(),
+  "transaction_category": zod.string().nullish(),
+  "created_at": zod.string(),
+  "transaction_details": zod.object({
+  "status": zod.string().nullish(),
+  "payer": zod.string().nullish(),
+  "receiver": zod.string().nullish(),
+  "phone_number": zod.string().nullish(),
+  "channel": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "merchant_id": zod.string().nullish(),
+  "account_number": zod.string().nullish(),
+  "email_address": zod.string().nullish()
+}).optional()
+})
+
+
+/**
  * @summary Initiate a payout (withdrawal to mobile money)
  */
 export const initiatePayoutBodyCurrencyDefault = `KES`;

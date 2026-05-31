@@ -25,6 +25,10 @@ import type {
   DashboardSummary,
   GetTransactionsParams,
   HealthStatus,
+  MerchantPayoutInput,
+  MerchantPayoutResult,
+  P2PTransferInput,
+  P2PTransferResult,
   PayHeroWallet,
   PayHeroWithdrawInput,
   PayHeroWithdrawResult,
@@ -32,7 +36,8 @@ import type {
   PayinResult,
   PayoutInput,
   PayoutResult,
-  TransactionList
+  TransactionList,
+  TransactionStatusResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -355,6 +360,225 @@ export const useInitiatePayin = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getInitiatePayinMutationOptions(options));
     }
+
+export const getInitiateMerchantPayoutUrl = () => {
+
+
+
+
+  return `/api/payd/merchant`
+}
+
+/**
+ * @summary Pay to a Paybill or Till number
+ */
+export const initiateMerchantPayout = async (merchantPayoutInput: MerchantPayoutInput, options?: RequestInit): Promise<MerchantPayoutResult> => {
+
+  return customFetch<MerchantPayoutResult>(getInitiateMerchantPayoutUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      merchantPayoutInput,)
+  }
+);}
+
+
+
+
+export const getInitiateMerchantPayoutMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof initiateMerchantPayout>>, TError,{data: BodyType<MerchantPayoutInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof initiateMerchantPayout>>, TError,{data: BodyType<MerchantPayoutInput>}, TContext> => {
+
+const mutationKey = ['initiateMerchantPayout'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof initiateMerchantPayout>>, {data: BodyType<MerchantPayoutInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  initiateMerchantPayout(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InitiateMerchantPayoutMutationResult = NonNullable<Awaited<ReturnType<typeof initiateMerchantPayout>>>
+    export type InitiateMerchantPayoutMutationBody = BodyType<MerchantPayoutInput>
+    export type InitiateMerchantPayoutMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Pay to a Paybill or Till number
+ */
+export const useInitiateMerchantPayout = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof initiateMerchantPayout>>, TError,{data: BodyType<MerchantPayoutInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof initiateMerchantPayout>>,
+        TError,
+        {data: BodyType<MerchantPayoutInput>},
+        TContext
+      > => {
+      return useMutation(getInitiateMerchantPayoutMutationOptions(options));
+    }
+
+export const getInitiateP2PTransferUrl = () => {
+
+
+
+
+  return `/api/payd/p2p`
+}
+
+/**
+ * @summary Send money to a fellow Payd member
+ */
+export const initiateP2PTransfer = async (p2PTransferInput: P2PTransferInput, options?: RequestInit): Promise<P2PTransferResult> => {
+
+  return customFetch<P2PTransferResult>(getInitiateP2PTransferUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      p2PTransferInput,)
+  }
+);}
+
+
+
+
+export const getInitiateP2PTransferMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof initiateP2PTransfer>>, TError,{data: BodyType<P2PTransferInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof initiateP2PTransfer>>, TError,{data: BodyType<P2PTransferInput>}, TContext> => {
+
+const mutationKey = ['initiateP2PTransfer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof initiateP2PTransfer>>, {data: BodyType<P2PTransferInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  initiateP2PTransfer(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InitiateP2PTransferMutationResult = NonNullable<Awaited<ReturnType<typeof initiateP2PTransfer>>>
+    export type InitiateP2PTransferMutationBody = BodyType<P2PTransferInput>
+    export type InitiateP2PTransferMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Send money to a fellow Payd member
+ */
+export const useInitiateP2PTransfer = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof initiateP2PTransfer>>, TError,{data: BodyType<P2PTransferInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof initiateP2PTransfer>>,
+        TError,
+        {data: BodyType<P2PTransferInput>},
+        TContext
+      > => {
+      return useMutation(getInitiateP2PTransferMutationOptions(options));
+    }
+
+export const getGetTransactionStatusUrl = (reference: string,) => {
+
+
+
+
+  return `/api/payd/tx-status/${reference}`
+}
+
+/**
+ * @summary Look up the status of a transaction by reference
+ */
+export const getTransactionStatus = async (reference: string, options?: RequestInit): Promise<TransactionStatusResult> => {
+
+  return customFetch<TransactionStatusResult>(getGetTransactionStatusUrl(reference),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTransactionStatusQueryKey = (reference: string,) => {
+    return [
+    `/api/payd/tx-status/${reference}`
+    ] as const;
+    }
+
+
+export const getGetTransactionStatusQueryOptions = <TData = Awaited<ReturnType<typeof getTransactionStatus>>, TError = ErrorType<ApiError>>(reference: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTransactionStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTransactionStatusQueryKey(reference);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTransactionStatus>>> = ({ signal }) => getTransactionStatus(reference, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(reference), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTransactionStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTransactionStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getTransactionStatus>>>
+export type GetTransactionStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Look up the status of a transaction by reference
+ */
+
+export function useGetTransactionStatus<TData = Awaited<ReturnType<typeof getTransactionStatus>>, TError = ErrorType<ApiError>>(
+ reference: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTransactionStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTransactionStatusQueryOptions(reference,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getInitiatePayoutUrl = () => {
 

@@ -66,10 +66,10 @@ export default function Dashboard() {
       </header>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Balances */}
+        {/* KES Balance */}
         <Card className="col-span-2 bg-card border-border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Available Balance</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">KES Wallet</CardTitle>
             <Wallet className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -82,6 +82,26 @@ export default function Dashboard() {
             )}
             <p className="text-xs text-muted-foreground mt-1">
               Ledger: {account?.balances[0] ? formatCurrency(account.balances[0].ledger_balance, account.balances[0].currency) : '---'}
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* USD Balance */}
+        <Card className="col-span-2 bg-card border-border shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">USD Wallet</CardTitle>
+            <Wallet className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {loadingAccount ? (
+              <Skeleton className="h-8 w-32" />
+            ) : (
+              <div className="text-3xl font-bold font-mono tracking-tight">
+                {account?.balances[1] ? formatCurrency(account.balances[1].available_balance, account.balances[1].currency) : '$ 0.00'}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground mt-1">
+              Ledger: {account?.balances[1] ? formatCurrency(account.balances[1].ledger_balance, account.balances[1].currency) : '$ 0.00'}
             </p>
           </CardContent>
         </Card>

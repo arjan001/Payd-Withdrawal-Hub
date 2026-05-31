@@ -9,6 +9,11 @@ import {
   InitiatePayoutBody,
   InitiatePayoutResponse,
   GetSummaryResponse,
+  InitiateMerchantPayoutBody,
+  InitiateMerchantPayoutResponse,
+  InitiateP2PTransferBody,
+  InitiateP2PTransferResponse,
+  GetTransactionStatusResponse,
 } from "@workspace/api-zod";
 import { paydGet, paydPost, getAccountUsername, getCallbackBase } from "../lib/payd";
 import { logger } from "../lib/logger";
@@ -281,6 +286,131 @@ router.get("/payd/summary", async (req, res): Promise<void> => {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to fetch Payd summary");
     res.status(status).json({ error: "Failed to fetch summary", message });
+  }
+});
+
+// POST /api/payd/merchant — Pay to Paybill or Till
+router.post("/payd/merchant", async (req, res): Promise<void> => {
+  try {
+    const parsed = InitiateMerchantPayoutBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const { amount, currency = "KES", phone_number, narration, business_account, business_number, wallet_type } = parsed.data;
+    const username = getAccountUsername();
+    const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
+
+    const rawData = await paydPost<Record<string, unknown>>("/api/v2/payments", {
+      username,
+      amount,
+      currency,
+      phone_number,
+      narration,
+      transaction_channel: "bank",
+      channel: "bank",
+      business_account,
+      business_number: business_number ?? "0000000000000",
+      callback_url: callbackUrl,
+      ...(wallet_type ? { wallet_type } : {}),
+    });
+
+    req.log.info({ rawData }, "Payd merchant payout response");
+
+    const result = InitiateMerchantPayoutResponse.parse({
+      success: rawData["success"] !== false && rawData["status"] !== "failed",
+      correlator_id: (rawData["correlator_id"] ?? rawData["transaction_reference"] ?? null) as string | null,
+      message: String(rawData["message"] ?? rawData["description"] ?? "Merchant payment initiated"),
+      status: (rawData["status"] ?? null) as string | null,
+    });
+
+    res.json(result);
+  } catch (err) {
+    const { status, message } = paydError(err);
+    req.log.error({ err }, "Failed to initiate merchant payout");
+    res.status(status).json({ error: "Failed to initiate merchant payment", message });
+  }
+});
+
+// POST /api/payd/p2p — Payd-to-Payd transfer
+router.post("/payd/p2p", async (req, res): Promise<void> => {
+  try {
+    const parsed = InitiateP2PTransferBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const { receiver_username, amount, narration, phone_number, wallet_type } = parsed.data;
+
+    const rawData = await paydPost<Record<string, unknown>>("/api/v2/p2p", {
+      receiver_username,
+      amount,
+      narration,
+      phone_number,
+      ...(wallet_type ? { wallet_type } : {}),
+    });
+
+    req.log.info({ rawData }, "Payd P2P transfer response");
+
+    const result = InitiateP2PTransferResponse.parse({
+      success: rawData["success"] !== false,
+      transaction_reference: (rawData["transaction_reference"] ?? null) as string | null,
+      message: String(rawData["message"] ?? rawData["description"] ?? "Transfer completed"),
+    });
+
+    res.json(result);
+  } catch (err) {
+    const { status, message } = paydError(err);
+    req.log.error({ err }, "Failed to initiate P2P transfer");
+    res.status(status).json({ error: "Failed to initiate transfer", message });
+  }
+});
+
+// GET /api/payd/tx-status/:reference — look up a transaction by reference
+router.get("/payd/tx-status/:reference", async (req, res): Promise<void> => {
+  try {
+    const reference = req.params["reference"];
+    if (!reference) {
+      res.status(400).json({ error: "Transaction reference is required" });
+      return;
+    }
+
+    const rawData = await paydGet<Record<string, unknown>>(`/api/v1/status/${reference}`);
+    req.log.debug({ rawData }, "Payd tx-status raw response");
+
+    const details = rawData["transaction_details"] as Record<string, unknown> | undefined;
+
+    const result = GetTransactionStatusResponse.parse({
+      id: String(rawData["id"] ?? reference),
+      code: String(rawData["code"] ?? reference),
+      currency: String(rawData["currency"] ?? "KES"),
+      amount: Number(rawData["amount"] ?? 0),
+      balance: Number(rawData["balance"] ?? 0),
+      type: String(rawData["type"] ?? "unknown"),
+      transaction_category: (rawData["transaction_category"] ?? null) as string | null,
+      created_at: String(rawData["created_at"] ?? new Date().toISOString()),
+      transaction_details: details
+        ? {
+            status: (details["status"] ?? null) as string | null,
+            payer: (details["payer"] ?? null) as string | null,
+            receiver: (details["receiver"] ?? null) as string | null,
+            phone_number: (details["phone_number"] ?? null) as string | null,
+            channel: (details["channel"] ?? null) as string | null,
+            reason: (details["reason"] ?? null) as string | null,
+            merchant_id: (details["merchant_id"] ?? null) as string | null,
+            account_number: (details["account_number"] ?? null) as string | null,
+            email_address: (details["email_address"] ?? null) as string | null,
+          }
+        : undefined,
+    });
+
+    res.json(result);
+  } catch (err) {
+    const { status, message } = paydError(err);
+    req.log.error({ err }, "Failed to fetch transaction status");
+    res.status(status).json({ error: "Failed to fetch transaction status", message });
   }
 });
 

@@ -1,0 +1,102 @@
+Payd-to-Payd Transfers
+Send money instantly between Payd accounts. These transfers are processed immediately and don't require network discovery or webhook handling - the response confirms the transfer.
+
+Key features
+⚡
+Instant
+Transfers complete immediately
+
+🆓
+Zero fees
+No charges for internal transfers
+
+✅
+Simple
+No network discovery needed
+
+Endpoint
+POST
+/api/v2/p2p
+Request parameters
+Body Parameters (JSON)
+Parameter	Type	Required	Description
+receiver_username	string	Required	Payd username of the recipient
+amount	number	Required	Amount to transfer
+narration	string	Required	Description of the transfer
+phone_number	string	Required	Recipient's phone number with country code (e.g., +254700000000)
+wallet_type	string	Optional	"local" (default) or "USD". When set to "USD", the transfer is funded from your USD wallet. The amount is still specified in the local currency and Payd converts from your USD balance automatically
+phone_number The phone_number field is the recipient's phone number associated with their Payd account.
+Request examples
+cURL
+JavaScript
+Python
+bash
+Copy
+curl -X POST https://api.payd.money/api/v2/p2p \
+  -u 'YOUR_API_USERNAME:YOUR_API_PASSWORD' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "receiver_username": "recipient_username",
+    "amount": 10,
+    "narration": "Family breakfast",
+    "phone_number": "+254700000000"
+  }'
+Responses
+Success Response
+The transfer was processed successfully. Both accounts have been updated.
+
+200 OK
+Copy
+{
+  "transaction_reference": "9BD12041887.eS",
+  "success": true,
+  "message": "Transaction request sent successfully",
+  "trackingId": "",
+  "reference": "",
+  "result": null
+}
+Error Response
+The request failed validation. Returns an error status code (e.g. 400).
+
+400 Bad Request
+Copy
+{
+  "status": 400,
+  "success": false,
+  "message": "invalid phone number"
+}
+Webhook response
+Payd-to-Payd transfers follow the same webhook format as M-Pesa payouts. After the transfer is processed, Payd sends a POST request to your callback URL with the final transaction status. The result_code and status together are the source of truth for the transaction outcome.
+
+Transfer completed
+Success Callback
+Copy
+{
+  "transaction_reference": "9BD103739849eR",
+  "result_code": 0,
+  "remarks": "Successfully processes m-pesa transaction",
+  "third_party_trans_id": "UB9C46DH3Q",
+  "amount": 10,
+  "transaction_date": "2026-02-09 10:37:50.286784611 +0000 UTC m=+448005.605396772",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "user_id": "0de616fc-61f7-46e2-aa36-4c9eda58ed37",
+  "customer_name": "",
+  "success": true,
+  "web3_transaction_reference": ""
+}
+Transfer failed
+Failure Callback
+Copy
+{
+  "transaction_reference": "9BD104311505eR",
+  "result_code": 1,
+  "remarks": "Transaction failed with message: [Request Cancelled by user.]",
+  "transaction_date": "November",
+  "forward_url": "https://your-server.com/callback",
+  "order_id": "",
+  "success": false,
+  "status": ""
+}
+Important Always wait for the webhook callback to determine the final outcome. Check result_code and status: result_code: 0 + status: "success" means the transaction succeeded.
+Related

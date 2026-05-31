@@ -115,6 +115,99 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /payd/merchant:
+    post:
+      operationId: initiateMerchantPayout
+      tags: [payd]
+      summary: Pay to a Paybill or Till number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MerchantPayoutInput"
+      responses:
+        "200":
+          description: Merchant payment initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MerchantPayoutResult"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /payd/p2p:
+    post:
+      operationId: initiateP2PTransfer
+      tags: [payd]
+      summary: Send money to a fellow Payd member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/P2PTransferInput"
+      responses:
+        "200":
+          description: P2P transfer initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/P2PTransferResult"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /payd/tx-status/{reference}:
+    get:
+      operationId: getTransactionStatus
+      tags: [payd]
+      summary: Look up the status of a transaction by reference
+      parameters:
+        - name: reference
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transaction status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionStatusResult"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /payd/payout:
     post:
       operationId: initiatePayout
@@ -447,6 +540,133 @@ components:
       required:
         - success
         - message
+
+    MerchantPayoutInput:
+      type: object
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+          default: KES
+        phone_number:
+          type: string
+        narration:
+          type: string
+        business_type:
+          type: string
+          enum: [paybill, till]
+          default: paybill
+        business_account:
+          type: string
+        business_number:
+          type: ["string", "null"]
+        wallet_type:
+          type: ["string", "null"]
+      required:
+        - amount
+        - phone_number
+        - narration
+        - business_account
+
+    MerchantPayoutResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        correlator_id:
+          type: ["string", "null"]
+        message:
+          type: string
+        status:
+          type: ["string", "null"]
+      required:
+        - success
+        - message
+
+    P2PTransferInput:
+      type: object
+      properties:
+        receiver_username:
+          type: string
+        amount:
+          type: number
+        narration:
+          type: string
+        phone_number:
+          type: string
+        wallet_type:
+          type: ["string", "null"]
+      required:
+        - receiver_username
+        - amount
+        - narration
+        - phone_number
+
+    P2PTransferResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        transaction_reference:
+          type: ["string", "null"]
+        message:
+          type: string
+      required:
+        - success
+        - message
+
+    TransactionStatusDetails:
+      type: object
+      properties:
+        status:
+          type: ["string", "null"]
+        payer:
+          type: ["string", "null"]
+        receiver:
+          type: ["string", "null"]
+        phone_number:
+          type: ["string", "null"]
+        channel:
+          type: ["string", "null"]
+        reason:
+          type: ["string", "null"]
+        merchant_id:
+          type: ["string", "null"]
+        account_number:
+          type: ["string", "null"]
+        email_address:
+          type: ["string", "null"]
+
+    TransactionStatusResult:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        currency:
+          type: string
+        amount:
+          type: number
+        balance:
+          type: number
+        type:
+          type: string
+        transaction_category:
+          type: ["string", "null"]
+        created_at:
+          type: string
+        transaction_details:
+          $ref: "#/components/schemas/TransactionStatusDetails"
+      required:
+        - id
+        - code
+        - currency
+        - amount
+        - balance
+        - type
+        - created_at
 
     DashboardSummary:
       type: object
