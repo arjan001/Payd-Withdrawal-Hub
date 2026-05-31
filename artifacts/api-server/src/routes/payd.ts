@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import axios from "axios";
+import { desc, eq, count, sum, ilike, or } from "drizzle-orm";
 import {
   GetAccountResponse,
   GetTransactionsQueryParams,
@@ -15,6 +16,7 @@ import {
   InitiateP2PTransferResponse,
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
+import { db, transactionsTable } from "@workspace/db";
 import { paydGet, paydPost, getAccountUsername, getCallbackBase } from "../lib/payd";
 import { logger } from "../lib/logger";
 
@@ -56,7 +58,6 @@ router.get("/payd/account", async (req, res): Promise<void> => {
 
     const balances = [];
     if (fiat) {
-      // fiat_balance is always the local KES wallet per Payd docs
       balances.push({
         currency: "KES",
         available_balance: Number(fiat["balance"] ?? fiat["converted_balance"] ?? 0),
@@ -64,7 +65,6 @@ router.get("/payd/account", async (req, res): Promise<void> => {
       });
     }
     if (onchain) {
-      // onchain_balance is always the USD wallet per Payd docs
       balances.push({
         currency: "USD",
         available_balance: Number(onchain["balance"] ?? onchain["converted_balance"] ?? 0),
@@ -93,60 +93,38 @@ router.get("/payd/account", async (req, res): Promise<void> => {
   }
 });
 
-// GET /api/payd/transactions — transaction history
+// GET /api/payd/transactions — list from local DB with pagination
 router.get("/payd/transactions", async (req, res): Promise<void> => {
   try {
     const parsed = GetTransactionsQueryParams.safeParse(req.query);
     const page = parsed.success ? (parsed.data.page ?? 1) : 1;
     const limit = parsed.success ? (parsed.data.limit ?? 20) : 20;
-    const username = getAccountUsername();
+    const offset = (page - 1) * limit;
 
-    let rawItems: unknown[] = [];
-    let total = 0;
+    const [rows, totalRows] = await Promise.all([
+      db
+        .select()
+        .from(transactionsTable)
+        .orderBy(desc(transactionsTable.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ value: count() }).from(transactionsTable),
+    ]);
 
-    try {
-      const rawData = await paydGet<Record<string, unknown>>(
-        `/api/v1/accounts/${username}/history`,
-        { page, limit, per_page: limit },
-      );
-      const items = rawData["transactions"] ?? rawData["data"] ?? rawData["items"] ?? rawData;
-      rawItems = Array.isArray(items) ? items : [];
-      total = Number(rawData["total"] ?? rawData["count"] ?? rawItems.length);
-    } catch {
-      logger.warn("History endpoint not found, trying alternative");
-    }
+    const total = Number(totalRows[0]?.value ?? 0);
 
-    req.log.debug({ count: rawItems.length }, "Payd transactions raw response");
-
-    const transactions = rawItems.map((t, i) => {
-      const tx = t as Record<string, unknown>;
-      return {
-        id: String(tx["id"] ?? tx["code"] ?? tx["transaction_reference"] ?? tx["reference"] ?? i),
-        type: String(tx["type"] ?? tx["transaction_type"] ?? "unknown"),
-        amount: Number(tx["amount"] ?? 0),
-        currency: String(tx["currency"] ?? tx["billing_currency"] ?? "KES"),
-        status: String(
-          (tx["transaction_details"] as Record<string, unknown>)?.["status"] ??
-            tx["status"] ??
-            "unknown",
-        ),
-        narration: (tx["narration"] ?? tx["description"] ?? tx["note"] ?? null) as string | null,
-        created_at: String(tx["created_at"] ?? tx["createdAt"] ?? new Date().toISOString()),
-        reference: (tx["code"] ?? tx["transaction_reference"] ?? tx["reference"] ?? null) as
-          | string
-          | null,
-        channel: (
-          (tx["transaction_details"] as Record<string, unknown>)?.["channel"] ??
-          tx["channel"] ??
-          null
-        ) as string | null,
-        phone_number: (
-          (tx["transaction_details"] as Record<string, unknown>)?.["phone_number"] ??
-          tx["phone_number"] ??
-          null
-        ) as string | null,
-      };
-    });
+    const transactions = rows.map((t) => ({
+      id: String(t.id),
+      type: t.type,
+      amount: Number(t.amount),
+      currency: t.currency,
+      status: t.status,
+      narration: t.narration ?? null,
+      created_at: t.createdAt.toISOString(),
+      reference: t.reference ?? t.correlatorId ?? null,
+      channel: t.channel ?? null,
+      phone_number: t.phoneNumber ?? null,
+    }));
 
     const result = GetTransactionsResponse.parse({ transactions, total, page, limit });
     res.json(result);
@@ -182,13 +160,30 @@ router.post("/payd/payin", async (req, res): Promise<void> => {
 
     req.log.info({ rawData }, "Payd payin response");
 
+    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+    const success = rawData["success"] !== false && rawData["status"] !== "failed";
+
+    // Save to local DB
+    try {
+      await db.insert(transactionsTable).values({
+        reference: txRef ?? undefined,
+        type: "payin",
+        status: success ? "pending" : "failed",
+        amount: String(amount),
+        currency,
+        phoneNumber: phone_number,
+        narration: narration ?? "Payment",
+        channel,
+      });
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to save payin to DB");
+    }
+
     const result = InitiatePayinResponse.parse({
-      success: rawData["success"] !== false && rawData["status"] !== "failed",
-      reference: (rawData["transaction_reference"] ?? rawData["trackingId"] ?? null) as
-        | string
-        | null,
+      success,
+      reference: (rawData["transaction_reference"] ?? rawData["trackingId"] ?? null) as string | null,
       message: String(rawData["message"] ?? rawData["description"] ?? "Payin initiated"),
-      transaction_reference: (rawData["transaction_reference"] ?? null) as string | null,
+      transaction_reference: txRef,
     });
 
     res.json(result);
@@ -225,11 +220,29 @@ router.post("/payd/payout", async (req, res): Promise<void> => {
 
     req.log.info({ rawData }, "Payd payout response");
 
+    const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
+    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+    const success = rawData["success"] !== false && rawData["status"] !== "failed";
+
+    try {
+      await db.insert(transactionsTable).values({
+        reference: txRef ?? undefined,
+        correlatorId: correlatorId ?? undefined,
+        type: "payout",
+        status: success ? "pending" : "failed",
+        amount: String(amount),
+        currency,
+        phoneNumber: phone_number,
+        narration: narration ?? "Withdrawal",
+        channel: network_code,
+      });
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to save payout to DB");
+    }
+
     const result = InitiatePayoutResponse.parse({
-      success: rawData["success"] !== false && rawData["status"] !== "failed",
-      reference: (rawData["correlator_id"] ?? rawData["transaction_reference"] ?? null) as
-        | string
-        | null,
+      success,
+      reference: (correlatorId ?? txRef ?? null) as string | null,
       message: String(rawData["message"] ?? rawData["description"] ?? "Payout initiated"),
     });
 
@@ -238,54 +251,6 @@ router.post("/payd/payout", async (req, res): Promise<void> => {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to initiate Payd payout");
     res.status(status).json({ error: "Failed to initiate payout", message });
-  }
-});
-
-// GET /api/payd/summary — dashboard summary derived from balances
-router.get("/payd/summary", async (req, res): Promise<void> => {
-  try {
-    const username = getAccountUsername();
-
-    let transactions: unknown[] = [];
-    try {
-      const rawData = await paydGet<Record<string, unknown>>(
-        `/api/v1/accounts/${username}/history`,
-        { page: 1, limit: 100, per_page: 100 },
-      );
-      const items = rawData["transactions"] ?? rawData["data"] ?? rawData["items"] ?? rawData;
-      transactions = Array.isArray(items) ? items : [];
-    } catch {
-      logger.warn("Could not fetch transaction history for summary");
-    }
-
-    type TxRecord = Record<string, unknown>;
-    const payins = (transactions as TxRecord[]).filter(
-      (t) =>
-        String(t["type"] ?? "")
-          .toLowerCase()
-          .match(/payin|receipt|deposit|credit|top/),
-    );
-    const payouts = (transactions as TxRecord[]).filter(
-      (t) =>
-        String(t["type"] ?? "")
-          .toLowerCase()
-          .match(/payout|withdrawal|debit/),
-    );
-
-    const result = GetSummaryResponse.parse({
-      total_payin: payins.reduce((sum, t) => sum + Number(t["amount"] ?? 0), 0),
-      total_payout: payouts.reduce((sum, t) => sum + Number(t["amount"] ?? 0), 0),
-      payin_count: payins.length,
-      payout_count: payouts.length,
-      currency: "KES",
-      recent_activity_count: transactions.length,
-    });
-
-    res.json(result);
-  } catch (err) {
-    const { status, message } = paydError(err);
-    req.log.error({ err }, "Failed to fetch Payd summary");
-    res.status(status).json({ error: "Failed to fetch summary", message });
   }
 });
 
@@ -298,7 +263,7 @@ router.post("/payd/merchant", async (req, res): Promise<void> => {
       return;
     }
 
-    const { amount, currency = "KES", phone_number, narration, business_account, business_number, wallet_type } = parsed.data;
+    const { amount, currency = "KES", phone_number, narration, business_account, business_number, business_type, wallet_type } = parsed.data;
     const username = getAccountUsername();
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
@@ -318,9 +283,32 @@ router.post("/payd/merchant", async (req, res): Promise<void> => {
 
     req.log.info({ rawData }, "Payd merchant payout response");
 
+    const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
+    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+    const success = rawData["success"] !== false && rawData["status"] !== "failed";
+
+    try {
+      await db.insert(transactionsTable).values({
+        reference: txRef ?? undefined,
+        correlatorId: correlatorId ?? undefined,
+        type: "merchant",
+        status: success ? "pending" : "failed",
+        amount: String(amount),
+        currency,
+        phoneNumber: phone_number,
+        narration,
+        channel: "bank",
+        businessAccount: business_account,
+        businessType: business_type ?? "paybill",
+        walletType: wallet_type ?? null,
+      });
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to save merchant tx to DB");
+    }
+
     const result = InitiateMerchantPayoutResponse.parse({
-      success: rawData["success"] !== false && rawData["status"] !== "failed",
-      correlator_id: (rawData["correlator_id"] ?? rawData["transaction_reference"] ?? null) as string | null,
+      success,
+      correlator_id: correlatorId,
       message: String(rawData["message"] ?? rawData["description"] ?? "Merchant payment initiated"),
       status: (rawData["status"] ?? null) as string | null,
     });
@@ -354,9 +342,29 @@ router.post("/payd/p2p", async (req, res): Promise<void> => {
 
     req.log.info({ rawData }, "Payd P2P transfer response");
 
+    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+    const success = rawData["success"] !== false;
+
+    try {
+      await db.insert(transactionsTable).values({
+        reference: txRef ?? undefined,
+        type: "p2p",
+        status: success ? "success" : "failed",
+        amount: String(amount),
+        currency: "KES",
+        phoneNumber: phone_number,
+        narration,
+        channel: "payd",
+        receiverUsername: receiver_username,
+        walletType: wallet_type ?? null,
+      });
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to save P2P tx to DB");
+    }
+
     const result = InitiateP2PTransferResponse.parse({
-      success: rawData["success"] !== false,
-      transaction_reference: (rawData["transaction_reference"] ?? null) as string | null,
+      success,
+      transaction_reference: txRef,
       message: String(rawData["message"] ?? rawData["description"] ?? "Transfer completed"),
     });
 
@@ -381,6 +389,24 @@ router.get("/payd/tx-status/:reference", async (req, res): Promise<void> => {
     req.log.debug({ rawData }, "Payd tx-status raw response");
 
     const details = rawData["transaction_details"] as Record<string, unknown> | undefined;
+    const detailStatus = (details?.["status"] ?? null) as string | null;
+
+    // Update local DB record status if we have a final result
+    if (detailStatus === "success" || detailStatus === "failed") {
+      try {
+        await db
+          .update(transactionsTable)
+          .set({ status: detailStatus, remarks: (details?.["reason"] ?? null) as string | null })
+          .where(
+            or(
+              eq(transactionsTable.reference, reference),
+              eq(transactionsTable.correlatorId, reference),
+            ),
+          );
+      } catch (dbErr) {
+        logger.warn({ dbErr }, "Failed to update tx status in DB");
+      }
+    }
 
     const result = GetTransactionStatusResponse.parse({
       id: String(rawData["id"] ?? reference),
@@ -393,7 +419,7 @@ router.get("/payd/tx-status/:reference", async (req, res): Promise<void> => {
       created_at: String(rawData["created_at"] ?? new Date().toISOString()),
       transaction_details: details
         ? {
-            status: (details["status"] ?? null) as string | null,
+            status: detailStatus,
             payer: (details["payer"] ?? null) as string | null,
             receiver: (details["receiver"] ?? null) as string | null,
             phone_number: (details["phone_number"] ?? null) as string | null,
@@ -414,10 +440,78 @@ router.get("/payd/tx-status/:reference", async (req, res): Promise<void> => {
   }
 });
 
+// GET /api/payd/summary — derived from local DB
+router.get("/payd/summary", async (req, res): Promise<void> => {
+  try {
+    const [payinStats, payoutStats] = await Promise.all([
+      db
+        .select({ total: sum(transactionsTable.amount), cnt: count() })
+        .from(transactionsTable)
+        .where(
+          or(
+            eq(transactionsTable.type, "payin"),
+          ),
+        ),
+      db
+        .select({ total: sum(transactionsTable.amount), cnt: count() })
+        .from(transactionsTable)
+        .where(
+          or(
+            eq(transactionsTable.type, "payout"),
+            eq(transactionsTable.type, "merchant"),
+            eq(transactionsTable.type, "p2p"),
+          ),
+        ),
+    ]);
+
+    const [totalCount] = await db.select({ cnt: count() }).from(transactionsTable);
+
+    const result = GetSummaryResponse.parse({
+      total_payin: Number(payinStats[0]?.total ?? 0),
+      total_payout: Number(payoutStats[0]?.total ?? 0),
+      payin_count: Number(payinStats[0]?.cnt ?? 0),
+      payout_count: Number(payoutStats[0]?.cnt ?? 0),
+      currency: "KES",
+      recent_activity_count: Number(totalCount?.cnt ?? 0),
+    });
+
+    res.json(result);
+  } catch (err) {
+    const { status, message } = paydError(err);
+    req.log.error({ err }, "Failed to fetch Payd summary");
+    res.status(status).json({ error: "Failed to fetch summary", message });
+  }
+});
+
 // POST /api/webhook/payd — receive Payd transaction webhooks
-router.post("/webhook/payd", (req, res): void => {
+router.post("/webhook/payd", async (req, res): Promise<void> => {
   const payload = req.body as Record<string, unknown>;
   logger.info({ payload }, "Payd webhook received");
+
+  const txRef = (payload["transaction_reference"] ?? null) as string | null;
+  const resultCode = payload["result_code"];
+  const success = resultCode === 0 || payload["success"] === true;
+  const status = success ? "success" : "failed";
+  const remarks = (payload["remarks"] ?? null) as string | null;
+  const thirdPartyTransId = (payload["third_party_trans_id"] ?? null) as string | null;
+
+  if (txRef) {
+    try {
+      await db
+        .update(transactionsTable)
+        .set({ status, remarks, thirdPartyTransId })
+        .where(
+          or(
+            eq(transactionsTable.reference, txRef),
+            eq(transactionsTable.correlatorId, txRef),
+          ),
+        );
+      logger.info({ txRef, status }, "Updated transaction status from webhook");
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to update transaction from webhook");
+    }
+  }
+
   res.status(200).json({ received: true });
 });
 
