@@ -49,12 +49,28 @@ function paydError(err: unknown): { status: number; message: string } {
   return { status: 500, message: String(err) };
 }
 
-// GET /api/payd/account — fetch balances from Payd
+// GET /api/payd/account — fetch balances; returns zeros if not configured
 router.get("/payd/account", async (req: Request, res: Response): Promise<void> => {
   try {
     const client = await getPaydClient(getPaydUser(req));
-    const username = client.accountUsername;
 
+    if (!client) {
+      res.json({
+        username: null,
+        email: null,
+        first_name: null,
+        last_name: null,
+        account_id: null,
+        connected: false,
+        balances: [
+          { currency: "KES", available_balance: 0, ledger_balance: 0 },
+          { currency: "USD", available_balance: 0, ledger_balance: 0 },
+        ],
+      });
+      return;
+    }
+
+    const username = client.accountUsername;
     const rawData = await client.get<Record<string, unknown>>(
       `/api/v1/accounts/${username}/all_balances`,
     );
@@ -83,17 +99,17 @@ router.get("/payd/account", async (req: Request, res: Response): Promise<void> =
       balances.push({ currency: "KES", available_balance: 0, ledger_balance: 0 });
     }
 
-    const result = GetAccountResponse.parse({
-      username,
-      email: null,
-      first_name: null,
-      last_name: null,
-      account_id: username,
-      balances,
-      connected: true,
-    });
-
-    res.json(result);
+    res.json(
+      GetAccountResponse.parse({
+        username,
+        email: null,
+        first_name: null,
+        last_name: null,
+        account_id: username,
+        balances,
+        connected: true,
+      }),
+    );
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err, status }, "Failed to fetch Payd account");
@@ -134,8 +150,7 @@ router.get("/payd/transactions", async (req: Request, res: Response): Promise<vo
       phone_number: t.phoneNumber ?? null,
     }));
 
-    const result = GetTransactionsResponse.parse({ transactions, total, page, limit });
-    res.json(result);
+    res.json(GetTransactionsResponse.parse({ transactions, total, page, limit }));
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to fetch transactions");
@@ -145,6 +160,15 @@ router.get("/payd/transactions", async (req: Request, res: Response): Promise<vo
 
 // POST /api/payd/payin — M-Pesa STK push collection
 router.post("/payd/payin", async (req: Request, res: Response): Promise<void> => {
+  const client = await getPaydClient(getPaydUser(req));
+  if (!client) {
+    res.status(422).json({
+      error: "Credentials not configured",
+      message: "Please set up your Payd credentials in Settings before initiating a deposit.",
+    });
+    return;
+  }
+
   try {
     const parsed = InitiatePayinBody.safeParse(req.body);
     if (!parsed.success) {
@@ -153,7 +177,6 @@ router.post("/payd/payin", async (req: Request, res: Response): Promise<void> =>
     }
 
     const { phone_number, amount, currency = "KES", channel = "MPESA", narration } = parsed.data;
-    const client = await getPaydClient(getPaydUser(req));
     const username = client.accountUsername;
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
@@ -187,14 +210,14 @@ router.post("/payd/payin", async (req: Request, res: Response): Promise<void> =>
       logger.warn({ dbErr }, "Failed to save payin to DB");
     }
 
-    const result = InitiatePayinResponse.parse({
-      success,
-      reference: (rawData["transaction_reference"] ?? rawData["trackingId"] ?? null) as string | null,
-      message: String(rawData["message"] ?? rawData["description"] ?? "Payin initiated"),
-      transaction_reference: txRef,
-    });
-
-    res.json(result);
+    res.json(
+      InitiatePayinResponse.parse({
+        success,
+        reference: (rawData["transaction_reference"] ?? rawData["trackingId"] ?? null) as string | null,
+        message: String(rawData["message"] ?? rawData["description"] ?? "Payin initiated"),
+        transaction_reference: txRef,
+      }),
+    );
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to initiate Payd payin");
@@ -202,15 +225,22 @@ router.post("/payd/payin", async (req: Request, res: Response): Promise<void> =>
   }
 });
 
-// POST /api/payd/payout — M-Pesa withdrawal (requires withdrawals_enabled)
+// POST /api/payd/payout — M-Pesa withdrawal
 router.post("/payd/payout", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const client = await getPaydClient(getPaydUser(req));
-    if (!client.withdrawalsEnabled) {
-      res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
-      return;
-    }
+  const client = await getPaydClient(getPaydUser(req));
+  if (!client) {
+    res.status(422).json({
+      error: "Credentials not configured",
+      message: "Please set up your Payd credentials in Settings before initiating a withdrawal.",
+    });
+    return;
+  }
+  if (!client.withdrawalsEnabled) {
+    res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+    return;
+  }
 
+  try {
     const parsed = InitiatePayoutBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
@@ -253,13 +283,13 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
       logger.warn({ dbErr }, "Failed to save payout to DB");
     }
 
-    const result = InitiatePayoutResponse.parse({
-      success,
-      reference: (correlatorId ?? txRef ?? null) as string | null,
-      message: String(rawData["message"] ?? rawData["description"] ?? "Payout initiated"),
-    });
-
-    res.json(result);
+    res.json(
+      InitiatePayoutResponse.parse({
+        success,
+        reference: (correlatorId ?? txRef ?? null) as string | null,
+        message: String(rawData["message"] ?? rawData["description"] ?? "Payout initiated"),
+      }),
+    );
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to initiate Payd payout");
@@ -267,15 +297,22 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
   }
 });
 
-// POST /api/payd/merchant — Pay to Paybill or Till (requires withdrawals_enabled)
+// POST /api/payd/merchant — Pay to Paybill or Till
 router.post("/payd/merchant", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const client = await getPaydClient(getPaydUser(req));
-    if (!client.withdrawalsEnabled) {
-      res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
-      return;
-    }
+  const client = await getPaydClient(getPaydUser(req));
+  if (!client) {
+    res.status(422).json({
+      error: "Credentials not configured",
+      message: "Please set up your Payd credentials in Settings before initiating a payment.",
+    });
+    return;
+  }
+  if (!client.withdrawalsEnabled) {
+    res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+    return;
+  }
 
+  try {
     const parsed = InitiateMerchantPayoutBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
@@ -325,14 +362,14 @@ router.post("/payd/merchant", async (req: Request, res: Response): Promise<void>
       logger.warn({ dbErr }, "Failed to save merchant tx to DB");
     }
 
-    const result = InitiateMerchantPayoutResponse.parse({
-      success,
-      correlator_id: correlatorId,
-      message: String(rawData["message"] ?? rawData["description"] ?? "Merchant payment initiated"),
-      status: (rawData["status"] ?? null) as string | null,
-    });
-
-    res.json(result);
+    res.json(
+      InitiateMerchantPayoutResponse.parse({
+        success,
+        correlator_id: correlatorId,
+        message: String(rawData["message"] ?? rawData["description"] ?? "Merchant payment initiated"),
+        status: (rawData["status"] ?? null) as string | null,
+      }),
+    );
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to initiate merchant payout");
@@ -340,15 +377,22 @@ router.post("/payd/merchant", async (req: Request, res: Response): Promise<void>
   }
 });
 
-// POST /api/payd/p2p — Payd-to-Payd transfer (requires withdrawals_enabled)
+// POST /api/payd/p2p — Payd-to-Payd transfer
 router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const client = await getPaydClient(getPaydUser(req));
-    if (!client.withdrawalsEnabled) {
-      res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
-      return;
-    }
+  const client = await getPaydClient(getPaydUser(req));
+  if (!client) {
+    res.status(422).json({
+      error: "Credentials not configured",
+      message: "Please set up your Payd credentials in Settings before initiating a transfer.",
+    });
+    return;
+  }
+  if (!client.withdrawalsEnabled) {
+    res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+    return;
+  }
 
+  try {
     const parsed = InitiateP2PTransferBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
@@ -387,13 +431,13 @@ router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
       logger.warn({ dbErr }, "Failed to save P2P tx to DB");
     }
 
-    const result = InitiateP2PTransferResponse.parse({
-      success,
-      transaction_reference: txRef,
-      message: String(rawData["message"] ?? rawData["description"] ?? "Transfer completed"),
-    });
-
-    res.json(result);
+    res.json(
+      InitiateP2PTransferResponse.parse({
+        success,
+        transaction_reference: txRef,
+        message: String(rawData["message"] ?? rawData["description"] ?? "Transfer completed"),
+      }),
+    );
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to initiate P2P transfer");
@@ -401,8 +445,14 @@ router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// GET /api/payd/tx-status/:reference — look up a transaction by reference
+// GET /api/payd/tx-status/:reference
 router.get("/payd/tx-status/:reference", async (req: Request, res: Response): Promise<void> => {
+  const client = await getPaydClient(getPaydUser(req));
+  if (!client) {
+    res.status(422).json({ error: "Credentials not configured", message: "Please set up your credentials in Settings." });
+    return;
+  }
+
   try {
     const referenceRaw = req.params["reference"];
     const reference = Array.isArray(referenceRaw) ? referenceRaw[0] : referenceRaw;
@@ -411,7 +461,6 @@ router.get("/payd/tx-status/:reference", async (req: Request, res: Response): Pr
       return;
     }
 
-    const client = await getPaydClient(getPaydUser(req));
     const rawData = await client.get<Record<string, unknown>>(`/api/v1/status/${reference}`);
     req.log.debug({ rawData }, "Payd tx-status raw response");
 
@@ -434,31 +483,31 @@ router.get("/payd/tx-status/:reference", async (req: Request, res: Response): Pr
       }
     }
 
-    const result = GetTransactionStatusResponse.parse({
-      id: String(rawData["id"] ?? reference),
-      code: String(rawData["code"] ?? reference),
-      currency: String(rawData["currency"] ?? "KES"),
-      amount: Number(rawData["amount"] ?? 0),
-      balance: Number(rawData["balance"] ?? 0),
-      type: String(rawData["type"] ?? "unknown"),
-      transaction_category: (rawData["transaction_category"] ?? null) as string | null,
-      created_at: String(rawData["created_at"] ?? new Date().toISOString()),
-      transaction_details: details
-        ? {
-            status: detailStatus,
-            payer: (details["payer"] ?? null) as string | null,
-            receiver: (details["receiver"] ?? null) as string | null,
-            phone_number: (details["phone_number"] ?? null) as string | null,
-            channel: (details["channel"] ?? null) as string | null,
-            reason: (details["reason"] ?? null) as string | null,
-            merchant_id: (details["merchant_id"] ?? null) as string | null,
-            account_number: (details["account_number"] ?? null) as string | null,
-            email_address: (details["email_address"] ?? null) as string | null,
-          }
-        : undefined,
-    });
-
-    res.json(result);
+    res.json(
+      GetTransactionStatusResponse.parse({
+        id: String(rawData["id"] ?? reference),
+        code: String(rawData["code"] ?? reference),
+        currency: String(rawData["currency"] ?? "KES"),
+        amount: Number(rawData["amount"] ?? 0),
+        balance: Number(rawData["balance"] ?? 0),
+        type: String(rawData["type"] ?? "unknown"),
+        transaction_category: (rawData["transaction_category"] ?? null) as string | null,
+        created_at: String(rawData["created_at"] ?? new Date().toISOString()),
+        transaction_details: details
+          ? {
+              status: detailStatus,
+              payer: (details["payer"] ?? null) as string | null,
+              receiver: (details["receiver"] ?? null) as string | null,
+              phone_number: (details["phone_number"] ?? null) as string | null,
+              channel: (details["channel"] ?? null) as string | null,
+              reason: (details["reason"] ?? null) as string | null,
+              merchant_id: (details["merchant_id"] ?? null) as string | null,
+              account_number: (details["account_number"] ?? null) as string | null,
+              email_address: (details["email_address"] ?? null) as string | null,
+            }
+          : undefined,
+      }),
+    );
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to fetch transaction status");
@@ -487,16 +536,16 @@ router.get("/payd/summary", async (req: Request, res: Response): Promise<void> =
       db.select({ cnt: count() }).from(transactionsTable),
     ]);
 
-    const result = GetSummaryResponse.parse({
-      total_payin: Number(payinStats[0]?.total ?? 0),
-      total_payout: Number(payoutStats[0]?.total ?? 0),
-      payin_count: Number(payinStats[0]?.cnt ?? 0),
-      payout_count: Number(payoutStats[0]?.cnt ?? 0),
-      currency: "KES",
-      recent_activity_count: Number(totalCount[0]?.cnt ?? 0),
-    });
-
-    res.json(result);
+    res.json(
+      GetSummaryResponse.parse({
+        total_payin: Number(payinStats[0]?.total ?? 0),
+        total_payout: Number(payoutStats[0]?.total ?? 0),
+        payin_count: Number(payinStats[0]?.cnt ?? 0),
+        payout_count: Number(payoutStats[0]?.cnt ?? 0),
+        currency: "KES",
+        recent_activity_count: Number(totalCount[0]?.cnt ?? 0),
+      }),
+    );
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to fetch Payd summary");

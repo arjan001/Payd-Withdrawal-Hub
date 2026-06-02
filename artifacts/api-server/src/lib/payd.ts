@@ -41,22 +41,15 @@ export async function lookupUserCredentials(accountUsername: string): Promise<Pa
   return null;
 }
 
-export async function getPaydClient(accountUsername?: string): Promise<PaydClient> {
-  let creds: PaydUserCredentials | null = null;
+/**
+ * Returns a Payd client for the given account username, or null if no
+ * credentials are found in the DB. Never falls back to environment variables.
+ */
+export async function getPaydClient(accountUsername?: string): Promise<PaydClient | null> {
+  if (!accountUsername) return null;
 
-  if (accountUsername) {
-    creds = await lookupUserCredentials(accountUsername);
-  }
-
-  if (!creds) {
-    const username = process.env["PAYD_USERNAME"];
-    const password = process.env["PAYD_PASSWORD"];
-    const acctUsername = process.env["PAYD_ACCOUNT_USERNAME"];
-    if (!username || !password || !acctUsername) {
-      throw new Error("Payd credentials not configured. Please set them in Settings.");
-    }
-    creds = { username, password, accountUsername: acctUsername, withdrawalsEnabled: false };
-  }
+  const creds = await lookupUserCredentials(accountUsername);
+  if (!creds) return null;
 
   const instance = axios.create({
     baseURL: API_BASE,
@@ -64,9 +57,6 @@ export async function getPaydClient(accountUsername?: string): Promise<PaydClien
     auth: { username: creds.username, password: creds.password },
     headers: { "Content-Type": "application/json" },
   });
-
-  const acct = creds.accountUsername;
-  const withdrawalsEnabled = creds.withdrawalsEnabled;
 
   return {
     get: async <T>(path: string, params?: Record<string, unknown>) => {
@@ -77,8 +67,8 @@ export async function getPaydClient(accountUsername?: string): Promise<PaydClien
       const res = await instance.post<T>(path, body);
       return res.data;
     },
-    accountUsername: acct,
-    withdrawalsEnabled,
+    accountUsername: creds.accountUsername,
+    withdrawalsEnabled: creds.withdrawalsEnabled,
   };
 }
 
