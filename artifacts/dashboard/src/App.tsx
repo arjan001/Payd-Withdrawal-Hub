@@ -12,6 +12,8 @@ import Transactions from "@/pages/transactions";
 import PayHero from "@/pages/payhero";
 import Merchant from "@/pages/merchant";
 import P2P from "@/pages/p2p";
+import SettingsPage from "@/pages/settings";
+import Panel from "@/pages/panel";
 
 const queryClient = new QueryClient();
 
@@ -33,6 +35,8 @@ function Router() {
         <Route path="/payhero" component={PayHero} />
         <Route path="/merchant" component={Merchant} />
         <Route path="/p2p" component={P2P} />
+        <Route path="/settings" component={SettingsPage} />
+        <Route path="/panel" component={Panel} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

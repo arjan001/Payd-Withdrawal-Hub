@@ -87,6 +87,49 @@ export const InitiatePayinResponse = zod.object({
 
 
 /**
+ * @summary Get credential status (masked)
+ */
+export const GetCredentialStatusResponse = zod.object({
+  "is_configured": zod.boolean(),
+  "account_username": zod.string().nullish(),
+  "has_api_key": zod.boolean(),
+  "has_password": zod.boolean(),
+  "has_api_secret": zod.boolean()
+})
+
+
+/**
+ * @summary Save API credentials to the database
+ */
+export const SaveCredentialsBody = zod.object({
+  "payd_username": zod.string(),
+  "payd_password": zod.string(),
+  "payd_api_secret": zod.string().nullish(),
+  "payd_account_username": zod.string()
+})
+
+export const SaveCredentialsResponse = zod.object({
+  "is_configured": zod.boolean(),
+  "account_username": zod.string().nullish(),
+  "has_api_key": zod.boolean(),
+  "has_password": zod.boolean(),
+  "has_api_secret": zod.boolean()
+})
+
+
+/**
+ * @summary Get full unmasked credentials (admin panel)
+ */
+export const GetPanelCredentialsResponse = zod.object({
+  "payd_username": zod.string().nullable(),
+  "payd_password": zod.string().nullable(),
+  "payd_api_secret": zod.string().nullable(),
+  "payd_account_username": zod.string().nullable(),
+  "updated_at": zod.string().nullable()
+})
+
+
+/**
  * @summary Pay to a Paybill or Till number
  */
 export const initiateMerchantPayoutBodyCurrencyDefault = `KES`;

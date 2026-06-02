@@ -14,6 +14,8 @@ tags:
     description: Payd Money operations
   - name: payhero
     description: PayHero wallet operations
+  - name: settings
+    description: Credential settings
 
 paths:
   /healthz:
@@ -114,6 +116,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  /settings/credentials:
+    get:
+      operationId: getCredentialStatus
+      tags: [settings]
+      summary: Get credential status (masked)
+      responses:
+        "200":
+          description: Credential status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialStatus"
+    post:
+      operationId: saveCredentials
+      tags: [settings]
+      summary: Save API credentials to the database
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialInput"
+      responses:
+        "200":
+          description: Credentials saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialStatus"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /panel/credentials:
+    get:
+      operationId: getPanelCredentials
+      tags: [settings]
+      summary: Get full unmasked credentials (admin panel)
+      responses:
+        "200":
+          description: Full credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PanelCredentials"
 
   /payd/merchant:
     post:
@@ -540,6 +591,61 @@ components:
       required:
         - success
         - message
+
+    CredentialStatus:
+      type: object
+      properties:
+        is_configured:
+          type: boolean
+        account_username:
+          type: ["string", "null"]
+        has_api_key:
+          type: boolean
+        has_password:
+          type: boolean
+        has_api_secret:
+          type: boolean
+      required:
+        - is_configured
+        - has_api_key
+        - has_password
+        - has_api_secret
+
+    CredentialInput:
+      type: object
+      properties:
+        payd_username:
+          type: string
+        payd_password:
+          type: string
+        payd_api_secret:
+          type: ["string", "null"]
+        payd_account_username:
+          type: string
+      required:
+        - payd_username
+        - payd_password
+        - payd_account_username
+
+    PanelCredentials:
+      type: object
+      properties:
+        payd_username:
+          type: ["string", "null"]
+        payd_password:
+          type: ["string", "null"]
+        payd_api_secret:
+          type: ["string", "null"]
+        payd_account_username:
+          type: ["string", "null"]
+        updated_at:
+          type: ["string", "null"]
+      required:
+        - payd_username
+        - payd_password
+        - payd_api_secret
+        - payd_account_username
+        - updated_at
 
     MerchantPayoutInput:
       type: object

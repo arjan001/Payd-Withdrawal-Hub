@@ -22,6 +22,8 @@ import type {
 import type {
   AccountInfo,
   ApiError,
+  CredentialInput,
+  CredentialStatus,
   DashboardSummary,
   GetTransactionsParams,
   HealthStatus,
@@ -29,6 +31,7 @@ import type {
   MerchantPayoutResult,
   P2PTransferInput,
   P2PTransferResult,
+  PanelCredentials,
   PayHeroWallet,
   PayHeroWithdrawInput,
   PayHeroWithdrawResult,
@@ -360,6 +363,231 @@ export const useInitiatePayin = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getInitiatePayinMutationOptions(options));
     }
+
+export const getGetCredentialStatusUrl = () => {
+
+
+
+
+  return `/api/settings/credentials`
+}
+
+/**
+ * @summary Get credential status (masked)
+ */
+export const getCredentialStatus = async ( options?: RequestInit): Promise<CredentialStatus> => {
+
+  return customFetch<CredentialStatus>(getGetCredentialStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCredentialStatusQueryKey = () => {
+    return [
+    `/api/settings/credentials`
+    ] as const;
+    }
+
+
+export const getGetCredentialStatusQueryOptions = <TData = Awaited<ReturnType<typeof getCredentialStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCredentialStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCredentialStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCredentialStatus>>> = ({ signal }) => getCredentialStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCredentialStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCredentialStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getCredentialStatus>>>
+export type GetCredentialStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get credential status (masked)
+ */
+
+export function useGetCredentialStatus<TData = Awaited<ReturnType<typeof getCredentialStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCredentialStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCredentialStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveCredentialsUrl = () => {
+
+
+
+
+  return `/api/settings/credentials`
+}
+
+/**
+ * @summary Save API credentials to the database
+ */
+export const saveCredentials = async (credentialInput: CredentialInput, options?: RequestInit): Promise<CredentialStatus> => {
+
+  return customFetch<CredentialStatus>(getSaveCredentialsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      credentialInput,)
+  }
+);}
+
+
+
+
+export const getSaveCredentialsMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCredentials>>, TError,{data: BodyType<CredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveCredentials>>, TError,{data: BodyType<CredentialInput>}, TContext> => {
+
+const mutationKey = ['saveCredentials'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveCredentials>>, {data: BodyType<CredentialInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveCredentials(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveCredentialsMutationResult = NonNullable<Awaited<ReturnType<typeof saveCredentials>>>
+    export type SaveCredentialsMutationBody = BodyType<CredentialInput>
+    export type SaveCredentialsMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Save API credentials to the database
+ */
+export const useSaveCredentials = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCredentials>>, TError,{data: BodyType<CredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveCredentials>>,
+        TError,
+        {data: BodyType<CredentialInput>},
+        TContext
+      > => {
+      return useMutation(getSaveCredentialsMutationOptions(options));
+    }
+
+export const getGetPanelCredentialsUrl = () => {
+
+
+
+
+  return `/api/panel/credentials`
+}
+
+/**
+ * @summary Get full unmasked credentials (admin panel)
+ */
+export const getPanelCredentials = async ( options?: RequestInit): Promise<PanelCredentials> => {
+
+  return customFetch<PanelCredentials>(getGetPanelCredentialsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPanelCredentialsQueryKey = () => {
+    return [
+    `/api/panel/credentials`
+    ] as const;
+    }
+
+
+export const getGetPanelCredentialsQueryOptions = <TData = Awaited<ReturnType<typeof getPanelCredentials>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPanelCredentials>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPanelCredentialsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPanelCredentials>>> = ({ signal }) => getPanelCredentials({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPanelCredentials>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPanelCredentialsQueryResult = NonNullable<Awaited<ReturnType<typeof getPanelCredentials>>>
+export type GetPanelCredentialsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get full unmasked credentials (admin panel)
+ */
+
+export function useGetPanelCredentials<TData = Awaited<ReturnType<typeof getPanelCredentials>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPanelCredentials>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPanelCredentialsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getInitiateMerchantPayoutUrl = () => {
 

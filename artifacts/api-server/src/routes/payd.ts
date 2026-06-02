@@ -46,7 +46,7 @@ function paydError(err: unknown): { status: number; message: string } {
 // GET /api/payd/account — fetch balances from Payd
 router.get("/payd/account", async (req, res): Promise<void> => {
   try {
-    const username = getAccountUsername();
+    const username = await getAccountUsername();
     const rawData = await paydGet<Record<string, unknown>>(
       `/api/v1/accounts/${username}/all_balances`,
     );
@@ -145,7 +145,7 @@ router.post("/payd/payin", async (req, res): Promise<void> => {
     }
 
     const { phone_number, amount, currency = "KES", channel = "MPESA", narration } = parsed.data;
-    const username = getAccountUsername();
+    const username = await getAccountUsername();
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
     const rawData = await paydPost<Record<string, unknown>>("/api/v2/payments", {
@@ -205,7 +205,7 @@ router.post("/payd/payout", async (req, res): Promise<void> => {
 
     const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } =
       parsed.data;
-    const username = getAccountUsername();
+    const username = await getAccountUsername();
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
     const rawData = await paydPost<Record<string, unknown>>("/api/v2/withdrawal", {
@@ -264,7 +264,7 @@ router.post("/payd/merchant", async (req, res): Promise<void> => {
     }
 
     const { amount, currency = "KES", phone_number, narration, business_account, business_number, business_type, wallet_type } = parsed.data;
-    const username = getAccountUsername();
+    const username = await getAccountUsername();
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
     const rawData = await paydPost<Record<string, unknown>>("/api/v2/payments", {

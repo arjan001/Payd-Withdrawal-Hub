@@ -124,6 +124,36 @@ export interface PayHeroWithdrawResult {
   status?: string | null;
 }
 
+export interface CredentialStatus {
+  is_configured: boolean;
+  /** @nullable */
+  account_username?: string | null;
+  has_api_key: boolean;
+  has_password: boolean;
+  has_api_secret: boolean;
+}
+
+export interface CredentialInput {
+  payd_username: string;
+  payd_password: string;
+  /** @nullable */
+  payd_api_secret?: string | null;
+  payd_account_username: string;
+}
+
+export interface PanelCredentials {
+  /** @nullable */
+  payd_username: string | null;
+  /** @nullable */
+  payd_password: string | null;
+  /** @nullable */
+  payd_api_secret: string | null;
+  /** @nullable */
+  payd_account_username: string | null;
+  /** @nullable */
+  updated_at: string | null;
+}
+
 export type MerchantPayoutInputBusinessType = typeof MerchantPayoutInputBusinessType[keyof typeof MerchantPayoutInputBusinessType];
 
 

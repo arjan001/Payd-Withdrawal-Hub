@@ -9,6 +9,8 @@
 export * from './accountInfo';
 export * from './apiError';
 export * from './balance';
+export * from './credentialInput';
+export * from './credentialStatus';
 export * from './dashboardSummary';
 export * from './getTransactionsParams';
 export * from './healthStatus';
@@ -17,6 +19,7 @@ export * from './merchantPayoutInputBusinessType';
 export * from './merchantPayoutResult';
 export * from './p2PTransferInput';
 export * from './p2PTransferResult';
+export * from './panelCredentials';
 export * from './payHeroWallet';
 export * from './payHeroWithdrawInput';
 export * from './payHeroWithdrawResult';
