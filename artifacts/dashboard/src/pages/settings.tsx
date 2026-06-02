@@ -131,15 +131,15 @@ export default function Settings() {
           <div className="flex items-start gap-2 text-sm">
             <Info size={15} className="text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-muted-foreground">
-              Credentials are <span className="text-foreground font-medium">stored in the database</span> and persist across sessions. 
-              They are accessible to administrators at <code className="font-mono text-xs bg-secondary px-1 py-0.5 rounded">/panel</code>.
+              Credentials are saved to <span className="text-foreground font-medium">local storage only</span> and are 
+              never transmitted or stored on any server.
             </p>
           </div>
           <div className="flex items-start gap-2 text-sm">
             <ShieldAlert size={15} className="text-yellow-500 mt-0.5 shrink-0" />
             <p className="text-muted-foreground">
-              <span className="text-yellow-500 font-medium">Session notice:</span> Active credential sessions are tied to your current browser session and will be destroyed on logout. 
-              Re-enter credentials after starting a new session.
+              <span className="text-yellow-500 font-medium">Session notice:</span> Credentials will be automatically deleted 
+              when you clear your browser cache or close your browser. You will need to re-enter them next session.
             </p>
           </div>
         </CardContent>

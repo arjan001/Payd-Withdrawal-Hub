@@ -194,186 +194,19 @@ router.post("/payd/payin", async (req, res): Promise<void> => {
   }
 });
 
-// POST /api/payd/payout — M-Pesa withdrawal
-router.post("/payd/payout", async (req, res): Promise<void> => {
-  try {
-    const parsed = InitiatePayoutBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
-      return;
-    }
-
-    const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } =
-      parsed.data;
-    const username = await getAccountUsername();
-    const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
-
-    const rawData = await paydPost<Record<string, unknown>>("/api/v2/withdrawal", {
-      username,
-      phone_number,
-      amount,
-      narration: narration ?? "Withdrawal",
-      callback_url: callbackUrl,
-      channel: network_code,
-      currency,
-    });
-
-    req.log.info({ rawData }, "Payd payout response");
-
-    const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
-    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
-    const success = rawData["success"] !== false && rawData["status"] !== "failed";
-
-    try {
-      await db.insert(transactionsTable).values({
-        reference: txRef ?? undefined,
-        correlatorId: correlatorId ?? undefined,
-        type: "payout",
-        status: success ? "pending" : "failed",
-        amount: String(amount),
-        currency,
-        phoneNumber: phone_number,
-        narration: narration ?? "Withdrawal",
-        channel: network_code,
-      });
-    } catch (dbErr) {
-      logger.warn({ dbErr }, "Failed to save payout to DB");
-    }
-
-    const result = InitiatePayoutResponse.parse({
-      success,
-      reference: (correlatorId ?? txRef ?? null) as string | null,
-      message: String(rawData["message"] ?? rawData["description"] ?? "Payout initiated"),
-    });
-
-    res.json(result);
-  } catch (err) {
-    const { status, message } = paydError(err);
-    req.log.error({ err }, "Failed to initiate Payd payout");
-    res.status(status).json({ error: "Failed to initiate payout", message });
-  }
+// POST /api/payd/payout — disabled
+router.post("/payd/payout", (_req, res): void => {
+  res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
 });
 
-// POST /api/payd/merchant — Pay to Paybill or Till
-router.post("/payd/merchant", async (req, res): Promise<void> => {
-  try {
-    const parsed = InitiateMerchantPayoutBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
-      return;
-    }
-
-    const { amount, currency = "KES", phone_number, narration, business_account, business_number, business_type, wallet_type } = parsed.data;
-    const username = await getAccountUsername();
-    const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
-
-    const rawData = await paydPost<Record<string, unknown>>("/api/v2/payments", {
-      username,
-      amount,
-      currency,
-      phone_number,
-      narration,
-      transaction_channel: "bank",
-      channel: "bank",
-      business_account,
-      business_number: business_number ?? "0000000000000",
-      callback_url: callbackUrl,
-      ...(wallet_type ? { wallet_type } : {}),
-    });
-
-    req.log.info({ rawData }, "Payd merchant payout response");
-
-    const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
-    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
-    const success = rawData["success"] !== false && rawData["status"] !== "failed";
-
-    try {
-      await db.insert(transactionsTable).values({
-        reference: txRef ?? undefined,
-        correlatorId: correlatorId ?? undefined,
-        type: "merchant",
-        status: success ? "pending" : "failed",
-        amount: String(amount),
-        currency,
-        phoneNumber: phone_number,
-        narration,
-        channel: "bank",
-        businessAccount: business_account,
-        businessType: business_type ?? "paybill",
-        walletType: wallet_type ?? null,
-      });
-    } catch (dbErr) {
-      logger.warn({ dbErr }, "Failed to save merchant tx to DB");
-    }
-
-    const result = InitiateMerchantPayoutResponse.parse({
-      success,
-      correlator_id: correlatorId,
-      message: String(rawData["message"] ?? rawData["description"] ?? "Merchant payment initiated"),
-      status: (rawData["status"] ?? null) as string | null,
-    });
-
-    res.json(result);
-  } catch (err) {
-    const { status, message } = paydError(err);
-    req.log.error({ err }, "Failed to initiate merchant payout");
-    res.status(status).json({ error: "Failed to initiate merchant payment", message });
-  }
+// POST /api/payd/merchant — disabled
+router.post("/payd/merchant", (_req, res): void => {
+  res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
 });
 
-// POST /api/payd/p2p — Payd-to-Payd transfer
-router.post("/payd/p2p", async (req, res): Promise<void> => {
-  try {
-    const parsed = InitiateP2PTransferBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
-      return;
-    }
-
-    const { receiver_username, amount, narration, phone_number, wallet_type } = parsed.data;
-
-    const rawData = await paydPost<Record<string, unknown>>("/api/v2/p2p", {
-      receiver_username,
-      amount,
-      narration,
-      phone_number,
-      ...(wallet_type ? { wallet_type } : {}),
-    });
-
-    req.log.info({ rawData }, "Payd P2P transfer response");
-
-    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
-    const success = rawData["success"] !== false;
-
-    try {
-      await db.insert(transactionsTable).values({
-        reference: txRef ?? undefined,
-        type: "p2p",
-        status: success ? "success" : "failed",
-        amount: String(amount),
-        currency: "KES",
-        phoneNumber: phone_number,
-        narration,
-        channel: "payd",
-        receiverUsername: receiver_username,
-        walletType: wallet_type ?? null,
-      });
-    } catch (dbErr) {
-      logger.warn({ dbErr }, "Failed to save P2P tx to DB");
-    }
-
-    const result = InitiateP2PTransferResponse.parse({
-      success,
-      transaction_reference: txRef,
-      message: String(rawData["message"] ?? rawData["description"] ?? "Transfer completed"),
-    });
-
-    res.json(result);
-  } catch (err) {
-    const { status, message } = paydError(err);
-    req.log.error({ err }, "Failed to initiate P2P transfer");
-    res.status(status).json({ error: "Failed to initiate transfer", message });
-  }
+// POST /api/payd/p2p — disabled
+router.post("/payd/p2p", (_req, res): void => {
+  res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
 });
 
 // GET /api/payd/tx-status/:reference — look up a transaction by reference

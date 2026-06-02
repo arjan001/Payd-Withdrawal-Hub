@@ -9,7 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Loader2, Phone, Store, CheckCircle2, Copy } from "lucide-react";
+import { Building2, Loader2, Phone, Store, CheckCircle2, Copy, XCircle } from "lucide-react";
 
 const merchantSchema = z.object({
   business_type: z.enum(["paybill", "till"]),
@@ -86,6 +86,16 @@ export default function Merchant() {
           Pay to a Paybill or Till (Buy Goods) number via M-Pesa.
         </p>
       </header>
+
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
+        <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+        <div>
+          <p className="font-semibold text-sm text-destructive">Payout Declined by Payd</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
+          </p>
+        </div>
+      </div>
 
       {successRef && (
         <Card className="border-primary/30 bg-primary/5">

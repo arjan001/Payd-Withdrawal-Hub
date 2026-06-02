@@ -9,7 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Loader2, Phone, AtSign, CheckCircle2, Copy, Zap } from "lucide-react";
+import { Users, Loader2, Phone, AtSign, CheckCircle2, Copy, Zap, XCircle } from "lucide-react";
 
 const p2pSchema = z.object({
   receiver_username: z.string().min(2, "Enter the recipient's Payd username"),
@@ -82,6 +82,16 @@ export default function P2P() {
           Instant zero-fee transfer to any Payd account. Completes immediately.
         </p>
       </header>
+
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
+        <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+        <div>
+          <p className="font-semibold text-sm text-destructive">Payout Declined by Payd</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
+          </p>
+        </div>
+      </div>
 
       {successRef && (
         <Card className="border-primary/30 bg-primary/5">

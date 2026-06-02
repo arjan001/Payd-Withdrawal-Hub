@@ -8,7 +8,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowUpRight, Loader2, Phone } from "lucide-react";
+import { ArrowUpRight, Loader2, Phone, XCircle } from "lucide-react";
 
 const payoutSchema = z.object({
   phone_number: z.string().min(9, "Valid phone number required (e.g. 254712345678)"),
@@ -84,6 +84,16 @@ export default function Payout() {
           Send money from your Payd balance directly to a mobile money wallet.
         </p>
       </header>
+
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
+        <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+        <div>
+          <p className="font-semibold text-sm text-destructive">Payout Declined by Payd</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
+          </p>
+        </div>
+      </div>
 
       <Card className="border-border shadow-sm bg-card border-t-destructive/50">
         <CardHeader>
