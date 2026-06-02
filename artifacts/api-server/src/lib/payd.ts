@@ -10,6 +10,7 @@ export interface PaydUserCredentials {
   password: string;
   accountUsername: string;
   withdrawalsEnabled: boolean;
+  isActive: boolean;
 }
 
 export interface PaydClient {
@@ -17,40 +18,10 @@ export interface PaydClient {
   post: <T>(path: string, body?: unknown) => Promise<T>;
   accountUsername: string;
   withdrawalsEnabled: boolean;
+  isActive: boolean;
 }
 
-export async function lookupUserCredentials(accountUsername: string): Promise<PaydUserCredentials | null> {
-  try {
-    const rows = await db
-      .select()
-      .from(credentialsTable)
-      .where(eq(credentialsTable.paydAccountUsername, accountUsername))
-      .limit(1);
-    const row = rows[0];
-    if (row?.paydUsername && row?.paydPassword && row?.paydAccountUsername) {
-      return {
-        username: row.paydUsername,
-        password: row.paydPassword,
-        accountUsername: row.paydAccountUsername,
-        withdrawalsEnabled: row.withdrawalsEnabled,
-      };
-    }
-  } catch (err) {
-    logger.warn({ err }, "Failed to read credentials from DB");
-  }
-  return null;
-}
-
-/**
- * Returns a Payd client for the given account username, or null if no
- * credentials are found in the DB. Never falls back to environment variables.
- */
-export async function getPaydClient(accountUsername?: string): Promise<PaydClient | null> {
-  if (!accountUsername) return null;
-
-  const creds = await lookupUserCredentials(accountUsername);
-  if (!creds) return null;
-
+function buildClient(creds: PaydUserCredentials): PaydClient {
   const instance = axios.create({
     baseURL: API_BASE,
     timeout: 30000,
@@ -69,7 +40,57 @@ export async function getPaydClient(accountUsername?: string): Promise<PaydClien
     },
     accountUsername: creds.accountUsername,
     withdrawalsEnabled: creds.withdrawalsEnabled,
+    isActive: creds.isActive,
   };
+}
+
+function rowToCredentials(row: typeof credentialsTable.$inferSelect): PaydUserCredentials {
+  return {
+    username: row.paydUsername,
+    password: row.paydPassword,
+    accountUsername: row.paydAccountUsername,
+    withdrawalsEnabled: row.withdrawalsEnabled,
+    isActive: row.isActive,
+  };
+}
+
+/**
+ * Returns the system-wide active Payd client (used for balance / payin).
+ * Returns null if no active credentials are set.
+ */
+export async function getActivePaydClient(): Promise<PaydClient | null> {
+  try {
+    const rows = await db
+      .select()
+      .from(credentialsTable)
+      .where(eq(credentialsTable.isActive, true))
+      .limit(1);
+    const row = rows[0];
+    if (row) return buildClient(rowToCredentials(row));
+  } catch (err) {
+    logger.warn({ err }, "Failed to read active credentials from DB");
+  }
+  return null;
+}
+
+/**
+ * Returns a Payd client for a specific account username (used for withdrawals).
+ * Returns null if no credentials found for that user.
+ */
+export async function getPaydClient(accountUsername?: string): Promise<PaydClient | null> {
+  if (!accountUsername) return null;
+  try {
+    const rows = await db
+      .select()
+      .from(credentialsTable)
+      .where(eq(credentialsTable.paydAccountUsername, accountUsername))
+      .limit(1);
+    const row = rows[0];
+    if (row) return buildClient(rowToCredentials(row));
+  } catch (err) {
+    logger.warn({ err }, "Failed to read credentials from DB for user", accountUsername);
+  }
+  return null;
 }
 
 export function getCallbackBase(): string {

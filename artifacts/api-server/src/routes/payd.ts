@@ -17,7 +17,7 @@ import {
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
 import { db, transactionsTable } from "@workspace/db";
-import { getPaydClient, getCallbackBase } from "../lib/payd";
+import { getPaydClient, getActivePaydClient, getCallbackBase } from "../lib/payd";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -49,10 +49,10 @@ function paydError(err: unknown): { status: number; message: string } {
   return { status: 500, message: String(err) };
 }
 
-// GET /api/payd/account — fetch balances; returns zeros if not configured
+// GET /api/payd/account — fetch balances using active credentials
 router.get("/payd/account", async (req: Request, res: Response): Promise<void> => {
   try {
-    const client = await getPaydClient(getPaydUser(req));
+    const client = await getActivePaydClient();
 
     if (!client) {
       res.json({
@@ -158,13 +158,13 @@ router.get("/payd/transactions", async (req: Request, res: Response): Promise<vo
   }
 });
 
-// POST /api/payd/payin — M-Pesa STK push collection
+// POST /api/payd/payin — M-Pesa STK push using active credentials
 router.post("/payd/payin", async (req: Request, res: Response): Promise<void> => {
-  const client = await getPaydClient(getPaydUser(req));
+  const client = await getActivePaydClient();
   if (!client) {
     res.status(422).json({
-      error: "Credentials not configured",
-      message: "Please set up your Payd credentials in Settings before initiating a deposit.",
+      error: "No active credentials",
+      message: "No active credentials are configured. An admin must activate credentials at /test before deposits can be made.",
     });
     return;
   }

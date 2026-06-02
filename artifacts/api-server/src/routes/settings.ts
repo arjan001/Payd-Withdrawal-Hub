@@ -26,7 +26,7 @@ function validateInput(body: unknown): {
   };
 }
 
-// GET /api/settings/credentials — return full credentials for current user
+// GET /api/settings/credentials — return full credentials for current user (by cookie)
 router.get("/settings/credentials", async (req: Request, res: Response): Promise<void> => {
   try {
     const paydUser = req.cookies[COOKIE_NAME] as string | undefined;
@@ -34,7 +34,8 @@ router.get("/settings/credentials", async (req: Request, res: Response): Promise
       res.json({
         is_configured: false, account_username: null,
         payd_username: null, payd_password: null, payd_api_secret: null,
-        withdrawals_enabled: false, has_api_key: false, has_password: false, has_api_secret: false,
+        is_active: false, withdrawals_enabled: false,
+        has_api_key: false, has_password: false, has_api_secret: false,
       });
       return;
     }
@@ -50,20 +51,22 @@ router.get("/settings/credentials", async (req: Request, res: Response): Promise
       res.json({
         is_configured: false, account_username: paydUser,
         payd_username: null, payd_password: null, payd_api_secret: null,
-        withdrawals_enabled: false, has_api_key: false, has_password: false, has_api_secret: false,
+        is_active: false, withdrawals_enabled: false,
+        has_api_key: false, has_password: false, has_api_secret: false,
       });
       return;
     }
 
     res.json({
-      is_configured: !!(row.paydUsername && row.paydPassword),
+      is_configured: true,
       account_username: row.paydAccountUsername,
       payd_username: row.paydUsername,
       payd_password: row.paydPassword,
       payd_api_secret: row.paydApiSecret,
+      is_active: row.isActive,
       withdrawals_enabled: row.withdrawalsEnabled,
-      has_api_key: !!row.paydUsername,
-      has_password: !!row.paydPassword,
+      has_api_key: true,
+      has_password: true,
       has_api_secret: !!row.paydApiSecret,
     });
   } catch (err) {
@@ -72,7 +75,7 @@ router.get("/settings/credentials", async (req: Request, res: Response): Promise
   }
 });
 
-// POST /api/settings/credentials — upsert per-user credentials and set cookie
+// POST /api/settings/credentials — upsert credentials, auto-activate if first in DB
 router.post("/settings/credentials", async (req: Request, res: Response): Promise<void> => {
   try {
     const parsed = validateInput(req.body);
@@ -83,13 +86,21 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
 
     const { payd_username, payd_password, payd_api_secret, payd_account_username } = parsed;
 
-    await db
+    // Check if there are any active credentials already — if not, auto-activate this one
+    const existing = await db.select({ id: credentialsTable.id })
+      .from(credentialsTable)
+      .where(eq(credentialsTable.isActive, true))
+      .limit(1);
+    const shouldAutoActivate = existing.length === 0;
+
+    const result = await db
       .insert(credentialsTable)
       .values({
         paydUsername: payd_username,
         paydPassword: payd_password,
         paydApiSecret: payd_api_secret ?? null,
         paydAccountUsername: payd_account_username,
+        isActive: shouldAutoActivate,
         withdrawalsEnabled: false,
       })
       .onConflictDoUpdate({
@@ -99,19 +110,23 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
           paydPassword: payd_password,
           paydApiSecret: payd_api_secret ?? null,
           updatedAt: new Date(),
+          // Do NOT reset isActive or withdrawalsEnabled on update — admin controls those
         },
-      });
+      })
+      .returning();
 
-    req.log.info({ account: payd_account_username }, "Credentials saved");
+    const saved = result[0];
+    req.log.info({ account: payd_account_username, isActive: saved?.isActive }, "Credentials saved");
     res.cookie(COOKIE_NAME, payd_account_username, COOKIE_OPTS);
 
     res.json({
       is_configured: true,
       account_username: payd_account_username,
-      payd_username: payd_username,
-      payd_password: payd_password,
+      payd_username,
+      payd_password,
       payd_api_secret: payd_api_secret ?? null,
-      withdrawals_enabled: false,
+      is_active: saved?.isActive ?? shouldAutoActivate,
+      withdrawals_enabled: saved?.withdrawalsEnabled ?? false,
       has_api_key: true,
       has_password: true,
       has_api_secret: !!payd_api_secret,
