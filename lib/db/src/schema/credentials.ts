@@ -1,16 +1,21 @@
-import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, boolean, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-export const credentialsTable = pgTable("credentials", {
-  id: serial("id").primaryKey(),
-  paydUsername: text("payd_username"),
-  paydPassword: text("payd_password"),
-  paydApiSecret: text("payd_api_secret"),
-  paydAccountUsername: text("payd_account_username"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+export const credentialsTable = pgTable(
+  "credentials",
+  {
+    id: serial("id").primaryKey(),
+    paydUsername: text("payd_username").notNull(),
+    paydPassword: text("payd_password").notNull(),
+    paydApiSecret: text("payd_api_secret"),
+    paydAccountUsername: text("payd_account_username").notNull(),
+    withdrawalsEnabled: boolean("withdrawals_enabled").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  },
+  (t) => [uniqueIndex("credentials_account_username_idx").on(t.paydAccountUsername)],
+);
 
 export const insertCredentialsSchema = createInsertSchema(credentialsTable).omit({
   id: true,

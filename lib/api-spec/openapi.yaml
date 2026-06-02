@@ -599,6 +599,14 @@ components:
           type: boolean
         account_username:
           type: ["string", "null"]
+        payd_username:
+          type: ["string", "null"]
+        payd_password:
+          type: ["string", "null"]
+        payd_api_secret:
+          type: ["string", "null"]
+        withdrawals_enabled:
+          type: boolean
         has_api_key:
           type: boolean
         has_password:
@@ -610,6 +618,7 @@ components:
         - has_api_key
         - has_password
         - has_api_secret
+        - withdrawals_enabled
 
     CredentialInput:
       type: object

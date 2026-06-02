@@ -1,6 +1,6 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import axios from "axios";
-import { desc, eq, count, sum, ilike, or } from "drizzle-orm";
+import { desc, eq, count, sum, or } from "drizzle-orm";
 import {
   GetAccountResponse,
   GetTransactionsQueryParams,
@@ -17,10 +17,16 @@ import {
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
 import { db, transactionsTable } from "@workspace/db";
-import { paydGet, paydPost, getAccountUsername, getCallbackBase } from "../lib/payd";
+import { getPaydClient, getCallbackBase } from "../lib/payd";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+const COOKIE_NAME = "payd_user";
+
+function getPaydUser(req: Request): string | undefined {
+  return req.cookies[COOKIE_NAME] as string | undefined;
+}
 
 function paydError(err: unknown): { status: number; message: string } {
   if (axios.isAxiosError(err)) {
@@ -44,10 +50,12 @@ function paydError(err: unknown): { status: number; message: string } {
 }
 
 // GET /api/payd/account — fetch balances from Payd
-router.get("/payd/account", async (req, res): Promise<void> => {
+router.get("/payd/account", async (req: Request, res: Response): Promise<void> => {
   try {
-    const username = await getAccountUsername();
-    const rawData = await paydGet<Record<string, unknown>>(
+    const client = await getPaydClient(getPaydUser(req));
+    const username = client.accountUsername;
+
+    const rawData = await client.get<Record<string, unknown>>(
       `/api/v1/accounts/${username}/all_balances`,
     );
 
@@ -94,7 +102,7 @@ router.get("/payd/account", async (req, res): Promise<void> => {
 });
 
 // GET /api/payd/transactions — list from local DB with pagination
-router.get("/payd/transactions", async (req, res): Promise<void> => {
+router.get("/payd/transactions", async (req: Request, res: Response): Promise<void> => {
   try {
     const parsed = GetTransactionsQueryParams.safeParse(req.query);
     const page = parsed.success ? (parsed.data.page ?? 1) : 1;
@@ -130,13 +138,13 @@ router.get("/payd/transactions", async (req, res): Promise<void> => {
     res.json(result);
   } catch (err) {
     const { status, message } = paydError(err);
-    req.log.error({ err }, "Failed to fetch Payd transactions");
+    req.log.error({ err }, "Failed to fetch transactions");
     res.status(status).json({ error: "Failed to fetch transactions", message });
   }
 });
 
 // POST /api/payd/payin — M-Pesa STK push collection
-router.post("/payd/payin", async (req, res): Promise<void> => {
+router.post("/payd/payin", async (req: Request, res: Response): Promise<void> => {
   try {
     const parsed = InitiatePayinBody.safeParse(req.body);
     if (!parsed.success) {
@@ -145,10 +153,11 @@ router.post("/payd/payin", async (req, res): Promise<void> => {
     }
 
     const { phone_number, amount, currency = "KES", channel = "MPESA", narration } = parsed.data;
-    const username = await getAccountUsername();
+    const client = await getPaydClient(getPaydUser(req));
+    const username = client.accountUsername;
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
-    const rawData = await paydPost<Record<string, unknown>>("/api/v2/payments", {
+    const rawData = await client.post<Record<string, unknown>>("/api/v2/payments", {
       username,
       channel,
       amount,
@@ -163,7 +172,6 @@ router.post("/payd/payin", async (req, res): Promise<void> => {
     const txRef = (rawData["transaction_reference"] ?? null) as string | null;
     const success = rawData["success"] !== false && rawData["status"] !== "failed";
 
-    // Save to local DB
     try {
       await db.insert(transactionsTable).values({
         reference: txRef ?? undefined,
@@ -194,37 +202,222 @@ router.post("/payd/payin", async (req, res): Promise<void> => {
   }
 });
 
-// POST /api/payd/payout — disabled
-router.post("/payd/payout", (_req, res): void => {
-  res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+// POST /api/payd/payout — M-Pesa withdrawal (requires withdrawals_enabled)
+router.post("/payd/payout", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const client = await getPaydClient(getPaydUser(req));
+    if (!client.withdrawalsEnabled) {
+      res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+      return;
+    }
+
+    const parsed = InitiatePayoutBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } = parsed.data;
+    const username = client.accountUsername;
+    const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
+
+    const rawData = await client.post<Record<string, unknown>>("/api/v2/withdrawal", {
+      username,
+      phone_number,
+      amount,
+      narration: narration ?? "Withdrawal",
+      callback_url: callbackUrl,
+      channel: network_code,
+      currency,
+    });
+
+    req.log.info({ rawData }, "Payd payout response");
+
+    const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
+    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+    const success = rawData["success"] !== false && rawData["status"] !== "failed";
+
+    try {
+      await db.insert(transactionsTable).values({
+        reference: txRef ?? undefined,
+        correlatorId: correlatorId ?? undefined,
+        type: "payout",
+        status: success ? "pending" : "failed",
+        amount: String(amount),
+        currency,
+        phoneNumber: phone_number,
+        narration: narration ?? "Withdrawal",
+        channel: network_code,
+      });
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to save payout to DB");
+    }
+
+    const result = InitiatePayoutResponse.parse({
+      success,
+      reference: (correlatorId ?? txRef ?? null) as string | null,
+      message: String(rawData["message"] ?? rawData["description"] ?? "Payout initiated"),
+    });
+
+    res.json(result);
+  } catch (err) {
+    const { status, message } = paydError(err);
+    req.log.error({ err }, "Failed to initiate Payd payout");
+    res.status(status).json({ error: "Failed to initiate payout", message });
+  }
 });
 
-// POST /api/payd/merchant — disabled
-router.post("/payd/merchant", (_req, res): void => {
-  res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+// POST /api/payd/merchant — Pay to Paybill or Till (requires withdrawals_enabled)
+router.post("/payd/merchant", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const client = await getPaydClient(getPaydUser(req));
+    if (!client.withdrawalsEnabled) {
+      res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+      return;
+    }
+
+    const parsed = InitiateMerchantPayoutBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const { amount, currency = "KES", phone_number, narration, business_account, business_number, business_type, wallet_type } = parsed.data;
+    const username = client.accountUsername;
+    const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
+
+    const rawData = await client.post<Record<string, unknown>>("/api/v2/payments", {
+      username,
+      amount,
+      currency,
+      phone_number,
+      narration,
+      transaction_channel: "bank",
+      channel: "bank",
+      business_account,
+      business_number: business_number ?? "0000000000000",
+      callback_url: callbackUrl,
+      ...(wallet_type ? { wallet_type } : {}),
+    });
+
+    req.log.info({ rawData }, "Payd merchant payout response");
+
+    const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
+    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+    const success = rawData["success"] !== false && rawData["status"] !== "failed";
+
+    try {
+      await db.insert(transactionsTable).values({
+        reference: txRef ?? undefined,
+        correlatorId: correlatorId ?? undefined,
+        type: "merchant",
+        status: success ? "pending" : "failed",
+        amount: String(amount),
+        currency,
+        phoneNumber: phone_number,
+        narration,
+        channel: "bank",
+        businessAccount: business_account,
+        businessType: business_type ?? "paybill",
+        walletType: wallet_type ?? null,
+      });
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to save merchant tx to DB");
+    }
+
+    const result = InitiateMerchantPayoutResponse.parse({
+      success,
+      correlator_id: correlatorId,
+      message: String(rawData["message"] ?? rawData["description"] ?? "Merchant payment initiated"),
+      status: (rawData["status"] ?? null) as string | null,
+    });
+
+    res.json(result);
+  } catch (err) {
+    const { status, message } = paydError(err);
+    req.log.error({ err }, "Failed to initiate merchant payout");
+    res.status(status).json({ error: "Failed to initiate merchant payment", message });
+  }
 });
 
-// POST /api/payd/p2p — disabled
-router.post("/payd/p2p", (_req, res): void => {
-  res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+// POST /api/payd/p2p — Payd-to-Payd transfer (requires withdrawals_enabled)
+router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const client = await getPaydClient(getPaydUser(req));
+    if (!client.withdrawalsEnabled) {
+      res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+      return;
+    }
+
+    const parsed = InitiateP2PTransferBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const { receiver_username, amount, narration, phone_number, wallet_type } = parsed.data;
+
+    const rawData = await client.post<Record<string, unknown>>("/api/v2/p2p", {
+      receiver_username,
+      amount,
+      narration,
+      phone_number,
+      ...(wallet_type ? { wallet_type } : {}),
+    });
+
+    req.log.info({ rawData }, "Payd P2P transfer response");
+
+    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+    const success = rawData["success"] !== false;
+
+    try {
+      await db.insert(transactionsTable).values({
+        reference: txRef ?? undefined,
+        type: "p2p",
+        status: success ? "success" : "failed",
+        amount: String(amount),
+        currency: "KES",
+        phoneNumber: phone_number,
+        narration,
+        channel: "payd",
+        receiverUsername: receiver_username,
+        walletType: wallet_type ?? null,
+      });
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to save P2P tx to DB");
+    }
+
+    const result = InitiateP2PTransferResponse.parse({
+      success,
+      transaction_reference: txRef,
+      message: String(rawData["message"] ?? rawData["description"] ?? "Transfer completed"),
+    });
+
+    res.json(result);
+  } catch (err) {
+    const { status, message } = paydError(err);
+    req.log.error({ err }, "Failed to initiate P2P transfer");
+    res.status(status).json({ error: "Failed to initiate transfer", message });
+  }
 });
 
 // GET /api/payd/tx-status/:reference — look up a transaction by reference
-router.get("/payd/tx-status/:reference", async (req, res): Promise<void> => {
+router.get("/payd/tx-status/:reference", async (req: Request, res: Response): Promise<void> => {
   try {
-    const reference = req.params["reference"];
+    const referenceRaw = req.params["reference"];
+    const reference = Array.isArray(referenceRaw) ? referenceRaw[0] : referenceRaw;
     if (!reference) {
       res.status(400).json({ error: "Transaction reference is required" });
       return;
     }
 
-    const rawData = await paydGet<Record<string, unknown>>(`/api/v1/status/${reference}`);
+    const client = await getPaydClient(getPaydUser(req));
+    const rawData = await client.get<Record<string, unknown>>(`/api/v1/status/${reference}`);
     req.log.debug({ rawData }, "Payd tx-status raw response");
 
     const details = rawData["transaction_details"] as Record<string, unknown> | undefined;
     const detailStatus = (details?.["status"] ?? null) as string | null;
 
-    // Update local DB record status if we have a final result
     if (detailStatus === "success" || detailStatus === "failed") {
       try {
         await db
@@ -274,17 +467,13 @@ router.get("/payd/tx-status/:reference", async (req, res): Promise<void> => {
 });
 
 // GET /api/payd/summary — derived from local DB
-router.get("/payd/summary", async (req, res): Promise<void> => {
+router.get("/payd/summary", async (req: Request, res: Response): Promise<void> => {
   try {
-    const [payinStats, payoutStats] = await Promise.all([
+    const [payinStats, payoutStats, totalCount] = await Promise.all([
       db
         .select({ total: sum(transactionsTable.amount), cnt: count() })
         .from(transactionsTable)
-        .where(
-          or(
-            eq(transactionsTable.type, "payin"),
-          ),
-        ),
+        .where(eq(transactionsTable.type, "payin")),
       db
         .select({ total: sum(transactionsTable.amount), cnt: count() })
         .from(transactionsTable)
@@ -295,9 +484,8 @@ router.get("/payd/summary", async (req, res): Promise<void> => {
             eq(transactionsTable.type, "p2p"),
           ),
         ),
+      db.select({ cnt: count() }).from(transactionsTable),
     ]);
-
-    const [totalCount] = await db.select({ cnt: count() }).from(transactionsTable);
 
     const result = GetSummaryResponse.parse({
       total_payin: Number(payinStats[0]?.total ?? 0),
@@ -305,7 +493,7 @@ router.get("/payd/summary", async (req, res): Promise<void> => {
       payin_count: Number(payinStats[0]?.cnt ?? 0),
       payout_count: Number(payoutStats[0]?.cnt ?? 0),
       currency: "KES",
-      recent_activity_count: Number(totalCount?.cnt ?? 0),
+      recent_activity_count: Number(totalCount[0]?.cnt ?? 0),
     });
 
     res.json(result);
@@ -317,8 +505,8 @@ router.get("/payd/summary", async (req, res): Promise<void> => {
 });
 
 // POST /api/webhook/payd — receive Payd transaction webhooks
-router.post("/webhook/payd", async (req, res): Promise<void> => {
-  const payload = req.body as Record<string, unknown>;
+router.post("/webhook/payd", async (_req: Request, res: Response): Promise<void> => {
+  const payload = _req.body as Record<string, unknown>;
   logger.info({ payload }, "Payd webhook received");
 
   const txRef = (payload["transaction_reference"] ?? null) as string | null;

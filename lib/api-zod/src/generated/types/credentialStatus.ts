@@ -10,6 +10,13 @@ export interface CredentialStatus {
   is_configured: boolean;
   /** @nullable */
   account_username?: string | null;
+  /** @nullable */
+  payd_username?: string | null;
+  /** @nullable */
+  payd_password?: string | null;
+  /** @nullable */
+  payd_api_secret?: string | null;
+  withdrawals_enabled: boolean;
   has_api_key: boolean;
   has_password: boolean;
   has_api_secret: boolean;

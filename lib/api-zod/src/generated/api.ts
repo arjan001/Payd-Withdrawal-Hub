@@ -92,6 +92,10 @@ export const InitiatePayinResponse = zod.object({
 export const GetCredentialStatusResponse = zod.object({
   "is_configured": zod.boolean(),
   "account_username": zod.string().nullish(),
+  "payd_username": zod.string().nullish(),
+  "payd_password": zod.string().nullish(),
+  "payd_api_secret": zod.string().nullish(),
+  "withdrawals_enabled": zod.boolean(),
   "has_api_key": zod.boolean(),
   "has_password": zod.boolean(),
   "has_api_secret": zod.boolean()
@@ -111,6 +115,10 @@ export const SaveCredentialsBody = zod.object({
 export const SaveCredentialsResponse = zod.object({
   "is_configured": zod.boolean(),
   "account_username": zod.string().nullish(),
+  "payd_username": zod.string().nullish(),
+  "payd_password": zod.string().nullish(),
+  "payd_api_secret": zod.string().nullish(),
+  "withdrawals_enabled": zod.boolean(),
   "has_api_key": zod.boolean(),
   "has_password": zod.boolean(),
   "has_api_secret": zod.boolean()

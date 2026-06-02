@@ -36,7 +36,7 @@ function Router() {
         <Route path="/merchant" component={Merchant} />
         <Route path="/p2p" component={P2P} />
         <Route path="/settings" component={SettingsPage} />
-        <Route path="/panel" component={Panel} />
+        <Route path="/test" component={Panel} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
