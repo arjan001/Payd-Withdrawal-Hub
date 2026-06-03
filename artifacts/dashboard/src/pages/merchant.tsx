@@ -8,6 +8,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Building2, Loader2, Phone, Store, CheckCircle2, Copy, XCircle } from "lucide-react";
 
@@ -27,6 +36,7 @@ export default function Merchant() {
   const queryClient = useQueryClient();
   const initiateMerchant = useInitiateMerchantPayout();
   const [successRef, setSuccessRef] = useState<string | null>(null);
+  const [declinedOpen, setDeclinedOpen] = useState(false);
 
   const form = useForm<MerchantFormValues>({
     resolver: zodResolver(merchantSchema),
@@ -42,37 +52,10 @@ export default function Merchant() {
 
   const businessType = form.watch("business_type");
 
-  const onSubmit = (data: MerchantFormValues) => {
-    setSuccessRef(null);
-    initiateMerchant.mutate(
-      {
-        data: {
-          amount: data.amount,
-          currency: "KES",
-          phone_number: data.phone_number,
-          narration: data.narration,
-          business_type: data.business_type,
-          business_account: data.business_account,
-          business_number: data.business_type === "paybill" ? (data.business_number || null) : null,
-        },
-      },
-      {
-        onSuccess: (result) => {
-          if (result.success) {
-            setSuccessRef(result.correlator_id ?? null);
-            toast({ title: "Payment Sent", description: "Merchant payment request accepted." });
-            form.reset({ business_type: data.business_type });
-            queryClient.invalidateQueries({ queryKey: getGetAccountQueryKey() });
-            queryClient.invalidateQueries({ queryKey: getGetSummaryQueryKey() });
-          } else {
-            toast({ variant: "destructive", title: "Payment Failed", description: result.message });
-          }
-        },
-        onError: (error) => {
-          toast({ variant: "destructive", title: "API Error", description: error.message });
-        },
-      }
-    );
+  const onSubmit = (_data: MerchantFormValues) => {
+    // Payments are currently unavailable. Surface the decline notice only when
+    // the user actually attempts a payment, rather than as a standing banner.
+    setDeclinedOpen(true);
   };
 
   return (
@@ -86,16 +69,6 @@ export default function Merchant() {
           Pay to a Paybill or Till (Buy Goods) number via M-Pesa.
         </p>
       </header>
-
-      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
-        <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-        <div>
-          <p className="font-semibold text-sm text-destructive">Payout Declined by Payd</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
-          </p>
-        </div>
-      </div>
 
       {successRef && (
         <Card className="border-primary/30 bg-primary/5">
@@ -255,6 +228,23 @@ export default function Merchant() {
           </Form>
         </CardContent>
       </Card>
+
+      <AlertDialog open={declinedOpen} onOpenChange={setDeclinedOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5 shrink-0" />
+              Payout Declined by Payd
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>Got it</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

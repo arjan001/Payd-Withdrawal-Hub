@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -7,6 +8,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowUpRight, Loader2, Phone, XCircle } from "lucide-react";
 
@@ -22,6 +32,7 @@ export default function Payout() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const initiatePayout = useInitiatePayout();
+  const [declinedOpen, setDeclinedOpen] = useState(false);
 
   const form = useForm<PayoutFormValues>({
     resolver: zodResolver(payoutSchema),
@@ -32,45 +43,10 @@ export default function Payout() {
     },
   });
 
-  const onSubmit = (data: PayoutFormValues) => {
-    initiatePayout.mutate(
-      { 
-        data: {
-          phone_number: data.phone_number,
-          amount: data.amount,
-          currency: "KES",
-          network_code: "MPESA",
-          narration: data.narration || "Withdrawal from account"
-        }
-      },
-      {
-        onSuccess: (result) => {
-          if (result.success) {
-            toast({
-              title: "Withdrawal Initiated",
-              description: "Funds are being transferred to the mobile number.",
-            });
-            form.reset();
-            queryClient.invalidateQueries({ queryKey: getGetAccountQueryKey() });
-            queryClient.invalidateQueries({ queryKey: getGetSummaryQueryKey() });
-            queryClient.invalidateQueries({ queryKey: getGetTransactionsQueryKey() });
-          } else {
-            toast({
-              variant: "destructive",
-              title: "Withdrawal Failed",
-              description: result.message || "Unknown error occurred",
-            });
-          }
-        },
-        onError: (error) => {
-          toast({
-            variant: "destructive",
-            title: "API Error",
-            description: error.message || "Failed to process withdrawal",
-          });
-        }
-      }
-    );
+  const onSubmit = (_data: PayoutFormValues) => {
+    // Payouts are currently unavailable. Surface the decline notice only when
+    // the user actually attempts a withdrawal, rather than as a standing banner.
+    setDeclinedOpen(true);
   };
 
   return (
@@ -84,16 +60,6 @@ export default function Payout() {
           Send money from your Payd balance directly to a mobile money wallet.
         </p>
       </header>
-
-      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
-        <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-        <div>
-          <p className="font-semibold text-sm text-destructive">Payout Declined by Payd</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
-          </p>
-        </div>
-      </div>
 
       <Card className="border-border shadow-sm bg-card border-t-destructive/50">
         <CardHeader>
@@ -173,6 +139,23 @@ export default function Payout() {
           </Form>
         </CardContent>
       </Card>
+
+      <AlertDialog open={declinedOpen} onOpenChange={setDeclinedOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5 shrink-0" />
+              Payout Declined by Payd
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>Got it</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

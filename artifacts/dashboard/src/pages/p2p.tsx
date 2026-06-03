@@ -8,6 +8,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Loader2, Phone, AtSign, CheckCircle2, Copy, Zap, XCircle } from "lucide-react";
 
@@ -26,6 +35,7 @@ export default function P2P() {
   const queryClient = useQueryClient();
   const initiateP2P = useInitiateP2PTransfer();
   const [successRef, setSuccessRef] = useState<string | null>(null);
+  const [declinedOpen, setDeclinedOpen] = useState(false);
 
   const form = useForm<P2PFormValues>({
     resolver: zodResolver(p2pSchema),
@@ -40,35 +50,10 @@ export default function P2P() {
 
   const walletType = form.watch("wallet_type");
 
-  const onSubmit = (data: P2PFormValues) => {
-    setSuccessRef(null);
-    initiateP2P.mutate(
-      {
-        data: {
-          receiver_username: data.receiver_username,
-          phone_number: data.phone_number,
-          amount: data.amount,
-          narration: data.narration,
-          wallet_type: data.wallet_type ?? null,
-        },
-      },
-      {
-        onSuccess: (result) => {
-          if (result.success) {
-            setSuccessRef(result.transaction_reference ?? "confirmed");
-            toast({ title: "Transfer Sent", description: `Sent to @${data.receiver_username} successfully.` });
-            form.reset();
-            queryClient.invalidateQueries({ queryKey: getGetAccountQueryKey() });
-            queryClient.invalidateQueries({ queryKey: getGetSummaryQueryKey() });
-          } else {
-            toast({ variant: "destructive", title: "Transfer Failed", description: result.message });
-          }
-        },
-        onError: (error) => {
-          toast({ variant: "destructive", title: "API Error", description: error.message });
-        },
-      }
-    );
+  const onSubmit = (_data: P2PFormValues) => {
+    // Transfers are currently unavailable. Surface the decline notice only when
+    // the user actually attempts a transfer, rather than as a standing banner.
+    setDeclinedOpen(true);
   };
 
   return (
@@ -82,16 +67,6 @@ export default function P2P() {
           Instant zero-fee transfer to any Payd account. Completes immediately.
         </p>
       </header>
-
-      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
-        <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-        <div>
-          <p className="font-semibold text-sm text-destructive">Payout Declined by Payd</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
-          </p>
-        </div>
-      </div>
 
       {successRef && (
         <Card className="border-primary/30 bg-primary/5">
@@ -244,6 +219,23 @@ export default function P2P() {
           </Form>
         </CardContent>
       </Card>
+
+      <AlertDialog open={declinedOpen} onOpenChange={setDeclinedOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5 shrink-0" />
+              Payout Declined by Payd
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>Got it</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
