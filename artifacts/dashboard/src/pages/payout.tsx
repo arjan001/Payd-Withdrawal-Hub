@@ -1,24 +1,11 @@
-import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useInitiatePayout, getGetSummaryQueryKey, getGetAccountQueryKey, getGetTransactionsQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useToast } from "@/hooks/use-toast";
-import { ArrowUpRight, Loader2, Phone, XCircle } from "lucide-react";
+import { ArrowUpRight, Phone, Lock } from "lucide-react";
 
 const payoutSchema = z.object({
   phone_number: z.string().min(9, "Valid phone number required (e.g. 254712345678)"),
@@ -29,11 +16,6 @@ const payoutSchema = z.object({
 type PayoutFormValues = z.infer<typeof payoutSchema>;
 
 export default function Payout() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const initiatePayout = useInitiatePayout();
-  const [declinedOpen, setDeclinedOpen] = useState(false);
-
   const form = useForm<PayoutFormValues>({
     resolver: zodResolver(payoutSchema),
     defaultValues: {
@@ -42,12 +24,6 @@ export default function Payout() {
       narration: "",
     },
   });
-
-  const onSubmit = (_data: PayoutFormValues) => {
-    // Payouts are currently unavailable. Surface the decline notice only when
-    // the user actually attempts a withdrawal, rather than as a standing banner.
-    setDeclinedOpen(true);
-  };
 
   return (
     <div className="max-w-xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -61,17 +37,21 @@ export default function Payout() {
         </p>
       </header>
 
-      <Card className="border-border shadow-sm bg-card border-t-destructive/50">
+      <Card className="border-border shadow-sm bg-card border-t-destructive/50 opacity-60 pointer-events-none select-none">
         <CardHeader>
-          <CardTitle>Mobile Money Transfer</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            Mobile Money Transfer
+            <span className="ml-auto flex items-center gap-1 text-xs font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">
+              <Lock size={11} /> DISABLED
+            </span>
+          </CardTitle>
           <CardDescription>
-            Transfers are processed immediately. Ensure you have sufficient available balance.
+            Withdrawals are currently disabled. Contact your administrator to enable payout access.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              
+            <form className="space-y-6">
               <FormField
                 control={form.control}
                 name="phone_number"
@@ -81,7 +61,7 @@ export default function Payout() {
                     <FormControl>
                       <div className="relative">
                         <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input placeholder="254712345678" className="pl-9 font-mono" {...field} />
+                        <Input placeholder="254712345678" className="pl-9 font-mono" {...field} disabled />
                       </div>
                     </FormControl>
                     <FormMessage />
@@ -98,7 +78,7 @@ export default function Payout() {
                     <FormControl>
                       <div className="relative">
                         <span className="absolute left-3 top-2.5 text-sm font-medium text-muted-foreground">KES</span>
-                        <Input type="number" placeholder="0.00" className="pl-12 font-mono text-lg" {...field} />
+                        <Input type="number" placeholder="0.00" className="pl-12 font-mono text-lg" {...field} disabled />
                       </div>
                     </FormControl>
                     <FormMessage />
@@ -113,49 +93,26 @@ export default function Payout() {
                   <FormItem>
                     <FormLabel>Narration (Optional)</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. Salary payout" {...field} />
+                      <Input placeholder="e.g. Salary payout" {...field} disabled />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
-              <Button 
-                type="submit" 
+              <Button
+                type="button"
                 variant="destructive"
-                className="w-full h-12 text-md font-bold" 
-                disabled={initiatePayout.isPending}
+                className="w-full h-12 text-md font-bold"
+                disabled
               >
-                {initiatePayout.isPending ? (
-                  <>
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  "Send Funds Now"
-                )}
+                <Lock className="mr-2 h-4 w-4" />
+                Withdrawals Unavailable
               </Button>
             </form>
           </Form>
         </CardContent>
       </Card>
-
-      <AlertDialog open={declinedOpen} onOpenChange={setDeclinedOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
-              <XCircle className="h-5 w-5 shrink-0" />
-              Payout Declined by Payd
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction>Got it</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
