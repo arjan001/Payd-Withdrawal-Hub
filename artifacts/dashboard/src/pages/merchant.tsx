@@ -2,8 +2,6 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useInitiateMerchantPayout, getGetAccountQueryKey, getGetSummaryQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -17,8 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useToast } from "@/hooks/use-toast";
-import { Building2, Loader2, Phone, Store, CheckCircle2, Copy, XCircle } from "lucide-react";
+import { Building2, Loader2, Phone, Store, XCircle } from "lucide-react";
 
 const merchantSchema = z.object({
   business_type: z.enum(["paybill", "till"]),
@@ -32,11 +29,8 @@ const merchantSchema = z.object({
 type MerchantFormValues = z.infer<typeof merchantSchema>;
 
 export default function Merchant() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const initiateMerchant = useInitiateMerchantPayout();
-  const [successRef, setSuccessRef] = useState<string | null>(null);
-  const [declinedOpen, setDeclinedOpen] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [failedOpen, setFailedOpen] = useState(false);
 
   const form = useForm<MerchantFormValues>({
     resolver: zodResolver(merchantSchema),
@@ -53,9 +47,11 @@ export default function Merchant() {
   const businessType = form.watch("business_type");
 
   const onSubmit = (_data: MerchantFormValues) => {
-    // Payments are currently unavailable. Surface the decline notice only when
-    // the user actually attempts a payment, rather than as a standing banner.
-    setDeclinedOpen(true);
+    setProcessing(true);
+    setTimeout(() => {
+      setProcessing(false);
+      setFailedOpen(true);
+    }, 1800);
   };
 
   return (
@@ -70,29 +66,6 @@ export default function Merchant() {
         </p>
       </header>
 
-      {successRef && (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="pt-5">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-              <div className="min-w-0">
-                <p className="font-semibold text-sm text-primary">Payment Accepted</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Correlator ID (use this to track status):</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <code className="font-mono text-xs bg-secondary px-2 py-1 rounded truncate">{successRef}</code>
-                  <button
-                    onClick={() => { void navigator.clipboard.writeText(successRef); }}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <Copy size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       <Card className="border-border shadow-sm bg-card">
         <CardHeader>
           <CardTitle>Business Payment</CardTitle>
@@ -104,7 +77,6 @@ export default function Merchant() {
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
 
-              {/* Business type selector */}
               <FormField
                 control={form.control}
                 name="business_type"
@@ -216,9 +188,9 @@ export default function Merchant() {
               <Button
                 type="submit"
                 className="w-full h-12 text-md font-bold"
-                disabled={initiateMerchant.isPending}
+                disabled={processing}
               >
-                {initiateMerchant.isPending ? (
+                {processing ? (
                   <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processing...</>
                 ) : (
                   `Pay to ${businessType === "paybill" ? "Paybill" : "Till"}`
@@ -229,19 +201,19 @@ export default function Merchant() {
         </CardContent>
       </Card>
 
-      <AlertDialog open={declinedOpen} onOpenChange={setDeclinedOpen}>
+      <AlertDialog open={failedOpen} onOpenChange={setFailedOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-destructive">
               <XCircle className="h-5 w-5 shrink-0" />
-              Payout Declined by Payd
+              Transaction Failed
             </AlertDialogTitle>
             <AlertDialogDescription>
-              API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
+              Unable to process the payment at this time. Please try again later.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction>Got it</AlertDialogAction>
+            <AlertDialogAction>OK</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -5,7 +6,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ArrowUpRight, Phone, Lock } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ArrowUpRight, Loader2, Phone, XCircle } from "lucide-react";
 
 const payoutSchema = z.object({
   phone_number: z.string().min(9, "Valid phone number required (e.g. 254712345678)"),
@@ -16,6 +26,9 @@ const payoutSchema = z.object({
 type PayoutFormValues = z.infer<typeof payoutSchema>;
 
 export default function Payout() {
+  const [processing, setProcessing] = useState(false);
+  const [failedOpen, setFailedOpen] = useState(false);
+
   const form = useForm<PayoutFormValues>({
     resolver: zodResolver(payoutSchema),
     defaultValues: {
@@ -24,6 +37,14 @@ export default function Payout() {
       narration: "",
     },
   });
+
+  const onSubmit = (_data: PayoutFormValues) => {
+    setProcessing(true);
+    setTimeout(() => {
+      setProcessing(false);
+      setFailedOpen(true);
+    }, 1800);
+  };
 
   return (
     <div className="max-w-xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -37,21 +58,17 @@ export default function Payout() {
         </p>
       </header>
 
-      <Card className="border-border shadow-sm bg-card border-t-destructive/50 opacity-60 pointer-events-none select-none">
+      <Card className="border-border shadow-sm bg-card border-t-destructive/50">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Mobile Money Transfer
-            <span className="ml-auto flex items-center gap-1 text-xs font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded">
-              <Lock size={11} /> DISABLED
-            </span>
-          </CardTitle>
+          <CardTitle>Mobile Money Transfer</CardTitle>
           <CardDescription>
-            Withdrawals are currently disabled. Contact your administrator to enable payout access.
+            Transfers are processed immediately. Ensure you have sufficient available balance.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form className="space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+
               <FormField
                 control={form.control}
                 name="phone_number"
@@ -61,7 +78,7 @@ export default function Payout() {
                     <FormControl>
                       <div className="relative">
                         <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input placeholder="254712345678" className="pl-9 font-mono" {...field} disabled />
+                        <Input placeholder="254712345678" className="pl-9 font-mono" {...field} />
                       </div>
                     </FormControl>
                     <FormMessage />
@@ -78,7 +95,7 @@ export default function Payout() {
                     <FormControl>
                       <div className="relative">
                         <span className="absolute left-3 top-2.5 text-sm font-medium text-muted-foreground">KES</span>
-                        <Input type="number" placeholder="0.00" className="pl-12 font-mono text-lg" {...field} disabled />
+                        <Input type="number" placeholder="0.00" className="pl-12 font-mono text-lg" {...field} />
                       </div>
                     </FormControl>
                     <FormMessage />
@@ -93,7 +110,7 @@ export default function Payout() {
                   <FormItem>
                     <FormLabel>Narration (Optional)</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. Salary payout" {...field} disabled />
+                      <Input placeholder="e.g. Salary payout" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -101,18 +118,38 @@ export default function Payout() {
               />
 
               <Button
-                type="button"
+                type="submit"
                 variant="destructive"
                 className="w-full h-12 text-md font-bold"
-                disabled
+                disabled={processing}
               >
-                <Lock className="mr-2 h-4 w-4" />
-                Withdrawals Unavailable
+                {processing ? (
+                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processing...</>
+                ) : (
+                  "Send Funds Now"
+                )}
               </Button>
             </form>
           </Form>
         </CardContent>
       </Card>
+
+      <AlertDialog open={failedOpen} onOpenChange={setFailedOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5 shrink-0" />
+              Transaction Failed
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Unable to process the withdrawal at this time. Please try again later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

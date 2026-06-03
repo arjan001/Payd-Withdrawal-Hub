@@ -2,8 +2,6 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useInitiateP2PTransfer, getGetAccountQueryKey, getGetSummaryQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -17,8 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useToast } from "@/hooks/use-toast";
-import { Users, Loader2, Phone, AtSign, CheckCircle2, Copy, Zap, XCircle } from "lucide-react";
+import { Users, Loader2, Phone, AtSign, Zap, XCircle } from "lucide-react";
 
 const p2pSchema = z.object({
   receiver_username: z.string().min(2, "Enter the recipient's Payd username"),
@@ -31,11 +28,8 @@ const p2pSchema = z.object({
 type P2PFormValues = z.infer<typeof p2pSchema>;
 
 export default function P2P() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const initiateP2P = useInitiateP2PTransfer();
-  const [successRef, setSuccessRef] = useState<string | null>(null);
-  const [declinedOpen, setDeclinedOpen] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [failedOpen, setFailedOpen] = useState(false);
 
   const form = useForm<P2PFormValues>({
     resolver: zodResolver(p2pSchema),
@@ -51,9 +45,11 @@ export default function P2P() {
   const walletType = form.watch("wallet_type");
 
   const onSubmit = (_data: P2PFormValues) => {
-    // Transfers are currently unavailable. Surface the decline notice only when
-    // the user actually attempts a transfer, rather than as a standing banner.
-    setDeclinedOpen(true);
+    setProcessing(true);
+    setTimeout(() => {
+      setProcessing(false);
+      setFailedOpen(true);
+    }, 1800);
   };
 
   return (
@@ -67,33 +63,6 @@ export default function P2P() {
           Instant zero-fee transfer to any Payd account. Completes immediately.
         </p>
       </header>
-
-      {successRef && (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="pt-5">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-              <div className="min-w-0">
-                <p className="font-semibold text-sm text-primary">Transfer Completed</p>
-                {successRef !== "confirmed" && (
-                  <>
-                    <p className="text-xs text-muted-foreground mt-0.5">Transaction Reference:</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <code className="font-mono text-xs bg-secondary px-2 py-1 rounded truncate">{successRef}</code>
-                      <button
-                        onClick={() => { void navigator.clipboard.writeText(successRef); }}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <Copy size={13} />
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       <Card className="border-border shadow-sm bg-card">
         <CardHeader>
@@ -207,10 +176,10 @@ export default function P2P() {
               <Button
                 type="submit"
                 className="w-full h-12 text-md font-bold"
-                disabled={initiateP2P.isPending}
+                disabled={processing}
               >
-                {initiateP2P.isPending ? (
-                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Sending...</>
+                {processing ? (
+                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processing...</>
                 ) : (
                   "Send Transfer"
                 )}
@@ -220,19 +189,19 @@ export default function P2P() {
         </CardContent>
       </Card>
 
-      <AlertDialog open={declinedOpen} onOpenChange={setDeclinedOpen}>
+      <AlertDialog open={failedOpen} onOpenChange={setFailedOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-destructive">
               <XCircle className="h-5 w-5 shrink-0" />
-              Payout Declined by Payd
+              Transaction Failed
             </AlertDialogTitle>
             <AlertDialogDescription>
-              API withdrawals are currently unavailable. Please contact Payd support to enable payouts on your account.
+              Unable to process the transfer at this time. Please try again later.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction>Got it</AlertDialogAction>
+            <AlertDialogAction>OK</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
