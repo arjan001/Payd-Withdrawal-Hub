@@ -1,7 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { ReactNode } from "react";
-import { ArrowDownLeft, ArrowUpRight, LayoutDashboard, Activity, Settings2, Building2, Users } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, LayoutDashboard, Activity, Building2, Users } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
+import CredentialsPrompt from "@/components/credentials-prompt";
 
 export default function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
@@ -13,11 +14,12 @@ export default function Layout({ children }: { children: ReactNode }) {
     { href: "/payout", label: "Withdraw (Payout)", icon: ArrowUpRight },
     { href: "/merchant", label: "Merchant Payment", icon: Building2 },
     { href: "/p2p", label: "Send to Payd Member", icon: Users },
-    { href: "/settings", label: "Settings", icon: Settings2 },
   ];
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground font-sans">
+      {/* One-time prompt to configure API credentials when none are set */}
+      <CredentialsPrompt />
       {/* Sidebar */}
       <aside className="w-64 border-r border-border bg-card flex flex-col">
         <div className="p-6">
