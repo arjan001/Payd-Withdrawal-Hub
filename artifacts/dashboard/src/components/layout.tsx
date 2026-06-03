@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { ReactNode } from "react";
-import { ArrowDownLeft, ArrowUpRight, LayoutDashboard, Activity, Wallet, Settings2, Building2, Users } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, LayoutDashboard, Activity, Settings2, Building2, Users } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -22,10 +22,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <aside className="w-64 border-r border-border bg-card flex flex-col">
         <div className="p-6">
           <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-            <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-primary-foreground">
-              <Wallet size={18} />
-            </div>
-            <span className="font-bold text-lg tracking-tight">PAYD<span className="text-primary">MONEY</span></span>
+            <img src="/logo.png" alt="Payd" className="h-10 w-auto" />
           </Link>
         </div>
 
