@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, credentialsTable } from "@workspace/db";
+import { db, credentialsTable, ensureCredentialsTable } from "@workspace/db";
 import { eq, not } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -21,6 +21,7 @@ function formatUser(r: typeof credentialsTable.$inferSelect) {
 // GET /api/test/users — all users (admin)
 router.get("/test/users", async (_req: Request, res: Response): Promise<void> => {
   try {
+    await ensureCredentialsTable();
     const rows = await db.select().from(credentialsTable).orderBy(credentialsTable.createdAt);
     res.json(rows.map(formatUser));
   } catch (err) {
@@ -39,6 +40,7 @@ router.patch("/test/users/:id/withdrawals", async (req: Request, res: Response):
     const enabled = typeof body["withdrawals_enabled"] === "boolean" ? body["withdrawals_enabled"] : undefined;
     if (enabled === undefined) { res.status(400).json({ error: "withdrawals_enabled (boolean) required" }); return; }
 
+    await ensureCredentialsTable();
     const updated = await db
       .update(credentialsTable)
       .set({ withdrawalsEnabled: enabled, updatedAt: new Date() })
@@ -60,6 +62,7 @@ router.patch("/test/users/:id/active", async (req: Request, res: Response): Prom
     if (isNaN(id)) { res.status(400).json({ error: "Invalid user id" }); return; }
 
     // Deactivate all, then activate target
+    await ensureCredentialsTable();
     await db.update(credentialsTable).set({ isActive: false }).where(not(eq(credentialsTable.id, id)));
     const updated = await db
       .update(credentialsTable)
@@ -81,6 +84,7 @@ router.delete("/test/users/:id", async (req: Request, res: Response): Promise<vo
     const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
     if (isNaN(id)) { res.status(400).json({ error: "Invalid user id" }); return; }
 
+    await ensureCredentialsTable();
     const deleted = await db
       .delete(credentialsTable)
       .where(eq(credentialsTable.id, id))
