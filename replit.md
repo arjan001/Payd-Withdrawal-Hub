@@ -52,6 +52,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
+- **Credential resolution order**: `getActivePaydClient()` / `getPaydClient()` (in `lib/payd.ts`) read the active row from the `credentials` Postgres table first, then fall back to the `PAYD_*` **Netlify environment variables** (`getEnvCredentials()`). Env vars are the always-persistent, server-side store — set them in Site settings → Environment variables (or `netlify env:set`) for credentials that survive every deploy without touching the database. Writing credentials to a file at runtime is NOT viable: Netlify Functions run on a read-only, per-instance ephemeral filesystem.
+- The `credentials` table is created by a migration in `netlify/database/migrations/`, applied automatically by Netlify on deploy. Until that migration is applied, saving via the UI returns a 503 with guidance to use the env vars instead.
 - Dashboard must be **rebuilt** after any frontend change: `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build`
 - Then **restart the API server workflow** so it serves the new `dist/public/` files.
 - The `PAYD_USERNAME` and `PAYD_PASSWORD` are API key credentials (not your Payd account login). Generated from Profile → API Keys in the Payd web app.
