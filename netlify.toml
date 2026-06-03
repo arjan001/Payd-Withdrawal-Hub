@@ -1,0 +1,25 @@
+# Netlify build configuration for the Payd Money Dashboard.
+#
+# The React/Vite dashboard is published as a static site, and the Express
+# API server runs as a Netlify Function (netlify/functions/api.mts).
+
+[build]
+  command = "PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build"
+  publish = "artifacts/dashboard/dist/public"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Forward all API calls to the Express server running as a function.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# SPA fallback: serve the dashboard's index.html for client-side routes.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
