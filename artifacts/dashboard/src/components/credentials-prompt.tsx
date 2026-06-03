@@ -17,8 +17,6 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
 
-const SEEN_KEY = "payd_credentials_prompt_seen";
-
 const schema = z.object({
   payd_account_username: z.string().min(1, "Account username is required"),
   payd_username: z.string().min(1, "API username is required"),
@@ -49,21 +47,8 @@ export default function CredentialsPrompt() {
 
   useEffect(() => {
     if (isLoading || !status) return;
-
-    let alreadySeen = false;
-    try {
-      alreadySeen = localStorage.getItem(SEEN_KEY) === "1";
-    } catch {
-      // localStorage unavailable — treat as not seen
-    }
-
-    if (!status.is_configured && !alreadySeen) {
+    if (!status.is_configured) {
       setOpen(true);
-      try {
-        localStorage.setItem(SEEN_KEY, "1");
-      } catch {
-        // ignore
-      }
     }
   }, [status, isLoading]);
 
