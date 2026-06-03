@@ -1,12 +1,14 @@
 import { Link, useLocation } from "wouter";
 import { ReactNode } from "react";
-import { ArrowDownLeft, ArrowUpRight, LayoutDashboard, Activity, Building2, Users } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, LayoutDashboard, Activity, Building2, Users, LogOut } from "lucide-react";
 import { useHealthCheck } from "@workspace/api-client-react";
 import CredentialsPrompt from "@/components/credentials-prompt";
+import { useAuth } from "@/components/auth-gate";
 
 export default function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { data: health } = useHealthCheck();
+  const { user, logout } = useAuth();
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -18,7 +20,6 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground font-sans">
-      {/* One-time prompt to configure API credentials when none are set */}
       <CredentialsPrompt />
       {/* Sidebar */}
       <aside className="w-64 border-r border-border bg-card flex flex-col">
@@ -36,8 +37,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                 key={item.href}
                 href={item.href}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                  isActive 
-                    ? "bg-primary/10 text-primary" 
+                  isActive
+                    ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                 }`}
               >
@@ -48,7 +49,25 @@ export default function Layout({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-border/50">
+        <div className="p-4 border-t border-border/50 space-y-3">
+          {/* Logged-in user + logout */}
+          {user && (
+            <div className="flex items-center justify-between">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-foreground truncate">{user.name}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{user.email}</p>
+              </div>
+              <button
+                onClick={() => void logout()}
+                title="Sign out"
+                className="ml-2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* System status */}
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span className="flex items-center gap-2">
               <Activity size={14} className={health?.status === "ok" ? "text-primary" : "text-destructive"} />

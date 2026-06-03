@@ -14,6 +14,7 @@ import Merchant from "@/pages/merchant";
 import P2P from "@/pages/p2p";
 import SettingsPage from "@/pages/settings";
 import Panel from "@/pages/panel";
+import AuthGate from "@/components/auth-gate";
 
 const queryClient = new QueryClient();
 
@@ -49,7 +50,9 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
+            <AuthGate>
+              <Router />
+            </AuthGate>
           </WouterRouter>
           <Toaster />
         </TooltipProvider>

@@ -19,3 +19,4 @@
 
 export * from "./transactions";
 export * from "./credentials";
+export * from "./users";
