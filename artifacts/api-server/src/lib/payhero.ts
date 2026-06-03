@@ -40,6 +40,9 @@ export function getPayheroCallbackBase(): string {
   }
   const devDomain = process.env["REPLIT_DEV_DOMAIN"];
   if (devDomain) return `https://${devDomain}`;
+  // Netlify exposes the deployed site URL via the URL env var.
+  const netlifyUrl = process.env["URL"];
+  if (netlifyUrl) return netlifyUrl.replace(/\/+$/, "");
   return "https://localhost";
 }
 
