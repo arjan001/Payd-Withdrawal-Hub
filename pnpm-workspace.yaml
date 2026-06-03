@@ -52,7 +52,9 @@ catalog:
   '@vitejs/plugin-react': ^5.0.4
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
-  drizzle-orm: ^0.45.2
+  # Pinned to the beta line: the Netlify Database adapter (drizzle-orm/netlify-db)
+  # only ships on drizzle-orm@beta. The stable 0.45 line does not include it.
+  drizzle-orm: 1.0.0-beta.22
   framer-motion: ^12.23.24
   lucide-react: ^0.545.0
   # Must be this exact version because expo requires it
