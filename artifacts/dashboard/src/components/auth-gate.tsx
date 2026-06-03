@@ -170,11 +170,20 @@ function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   );
 }
 
+const PUBLIC_PATHS = ["/test"];
+
+function isPublicPath(): boolean {
+  const { pathname } = window.location;
+  return PUBLIC_PATHS.some((p) => pathname === p || pathname.endsWith(p));
+}
+
 export default function AuthGate({ children }: { children: ReactNode }) {
+  const publicPath = isPublicPath();
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [checking, setChecking] = useState(true);
+  const [checking, setChecking] = useState(!publicPath);
 
   useEffect(() => {
+    if (publicPath) return;
     fetch("/api/auth/me")
       .then((r) => r.ok ? r.json() as Promise<AuthUser> : Promise.resolve(null))
       .then((u) => { if (u) setUser(u); })
@@ -186,6 +195,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
   };
+
+  // Public path — render children with no auth required
+  if (publicPath) {
+    return <>{children}</>;
+  }
 
   if (checking) {
     return (

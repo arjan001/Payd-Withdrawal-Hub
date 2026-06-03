@@ -25,22 +25,23 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function Router() {
+function ProtectedRouter() {
   return (
-    <Layout>
-      <Switch>
-        <Route path="/" component={Dashboard} />
-        <Route path="/payin" component={Payin} />
-        <Route path="/payout" component={Payout} />
-        <Route path="/transactions" component={Transactions} />
-        <Route path="/payhero" component={PayHero} />
-        <Route path="/merchant" component={Merchant} />
-        <Route path="/p2p" component={P2P} />
-        <Route path="/settings" component={SettingsPage} />
-        <Route path="/test" component={Panel} />
-        <Route component={NotFound} />
-      </Switch>
-    </Layout>
+    <AuthGate>
+      <Layout>
+        <Switch>
+          <Route path="/" component={Dashboard} />
+          <Route path="/payin" component={Payin} />
+          <Route path="/payout" component={Payout} />
+          <Route path="/transactions" component={Transactions} />
+          <Route path="/payhero" component={PayHero} />
+          <Route path="/merchant" component={Merchant} />
+          <Route path="/p2p" component={P2P} />
+          <Route path="/settings" component={SettingsPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </Layout>
+    </AuthGate>
   );
 }
 
@@ -50,9 +51,12 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <AuthGate>
-              <Router />
-            </AuthGate>
+            <Switch>
+              {/* Public route — no login required */}
+              <Route path="/test" component={Panel} />
+              {/* All other routes require authentication */}
+              <Route component={ProtectedRouter} />
+            </Switch>
           </WouterRouter>
           <Toaster />
         </TooltipProvider>
