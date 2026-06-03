@@ -1,18 +1,25 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
+import { getConnectionString } from "@netlify/database";
 import * as schema from "./schema";
 
-// Accept the connection string from either the Netlify Database env vars
-// (set automatically when the managed Postgres is provisioned) or the
-// DATABASE_URL used in local/Replit environments.
-const connectionString =
-  process.env.NETLIFY_DATABASE_URL ??
-  process.env.NETLIFY_DATABASE_URL_UNPOOLED ??
-  process.env.DATABASE_URL;
+// Resolve the connection string through Netlify's own database package. This is
+// the Neon Postgres instance that Netlify provisions and manages for the
+// project: `getConnectionString()` reads the credentials Netlify injects at
+// runtime (NETLIFY_DATABASE_URL and friends) so we never hard-code or juggle
+// individual env vars here. A local DATABASE_URL is still honoured as a
+// fallback for development outside of Netlify.
+const connectionString = (() => {
+  try {
+    return getConnectionString();
+  } catch {
+    return process.env.DATABASE_URL;
+  }
+})();
 
 if (!connectionString) {
   throw new Error(
-    "No database connection string found. Set NETLIFY_DATABASE_URL (Netlify) or DATABASE_URL.",
+    "No database connection string found. Provision the Netlify Database, or set DATABASE_URL locally.",
   );
 }
 
