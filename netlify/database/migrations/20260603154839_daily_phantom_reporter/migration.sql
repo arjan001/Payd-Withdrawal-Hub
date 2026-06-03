@@ -1,10 +1,10 @@
 CREATE TABLE "transactions" (
-	"id" serial PRIMARY KEY NOT NULL,
-	"reference" text,
-	"correlator_id" text,
+	"id" serial PRIMARY KEY,
+	"reference" text UNIQUE,
+	"correlator_id" text UNIQUE,
 	"type" text NOT NULL,
 	"status" text DEFAULT 'pending' NOT NULL,
-	"amount" numeric(14, 2) NOT NULL,
+	"amount" numeric(14,2) NOT NULL,
 	"currency" text DEFAULT 'KES' NOT NULL,
 	"phone_number" text,
 	"narration" text,
@@ -17,13 +17,11 @@ CREATE TABLE "transactions" (
 	"remarks" text,
 	"third_party_trans_id" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "transactions_reference_unique" UNIQUE("reference"),
-	CONSTRAINT "transactions_correlator_id_unique" UNIQUE("correlator_id")
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "credentials" (
-	"id" serial PRIMARY KEY NOT NULL,
+	"id" serial PRIMARY KEY,
 	"payd_username" text NOT NULL,
 	"payd_password" text NOT NULL,
 	"payd_api_secret" text,
@@ -34,4 +32,4 @@ CREATE TABLE "credentials" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX "credentials_account_username_idx" ON "credentials" USING btree ("payd_account_username");
+CREATE UNIQUE INDEX "credentials_account_username_idx" ON "credentials" ("payd_account_username");
