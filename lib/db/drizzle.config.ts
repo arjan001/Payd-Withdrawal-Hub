@@ -1,8 +1,22 @@
 import { defineConfig } from "drizzle-kit";
+import { getConnectionString } from "@netlify/database";
 import path from "path";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL, ensure the database is provisioned");
+// Resolve the connection string from Netlify's managed database (falling back
+// to a local DATABASE_URL) so `drizzle-kit generate` works both on the Netlify
+// platform and in local development.
+const connectionString = (() => {
+  try {
+    return getConnectionString();
+  } catch {
+    return process.env.DATABASE_URL;
+  }
+})();
+
+if (!connectionString) {
+  throw new Error(
+    "No database connection string found. Provision the Netlify Database, or set DATABASE_URL locally.",
+  );
 }
 
 export default defineConfig({
@@ -12,7 +26,7 @@ export default defineConfig({
   out: path.join(__dirname, "../../netlify/database/migrations"),
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL,
+    url: connectionString,
   },
   // Use a timestamp prefix so generated migrations always sort after any
   // previously-applied version (an index prefix of 0000 is rejected by the
