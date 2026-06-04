@@ -1,20 +1,33 @@
 # Payd Money Dashboard
 
-A dashboard for managing Payd Money account operations — view live balances, initiate M-Pesa payins (STK push) and payouts (withdrawals), and track transaction status.
+A fintech dashboard for managing Payd API account operations — view live balances, initiate M-Pesa payins (STK push), track transaction history.
 
-## Run & Operate
+## Quick Start (fresh fork / clone)
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080); also serves the built dashboard frontend at `/`
-- `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build` — rebuild the dashboard frontend (output: `artifacts/dashboard/dist/public/`)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+1. Open the Replit shell and run:
+   ```
+   pnpm install
+   ```
+2. Ensure the **PostgreSQL database** is provisioned (Replit provides one automatically — check the Database tab). The `DATABASE_URL` secret is set automatically.
+3. Start the API server workflow. On first boot the server **auto-creates every database table** — no manual migrations needed.
+4. Rebuild the dashboard frontend once:
+   ```
+   PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build
+   ```
+5. The app is ready at the preview URL.
+
+## Development Commands
+
+- `pnpm --filter @workspace/api-server run dev` — run API server (port from `PORT` env); also serves built dashboard at `/`
+- `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build` — rebuild the dashboard (run after any frontend change)
+- `pnpm run typecheck` — typecheck all packages
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks from OpenAPI spec
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM (not yet used)
+- DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
@@ -23,46 +36,35 @@ A dashboard for managing Payd Money account operations — view live balances, i
 ## Where things live
 
 - `artifacts/api-server/src/app.ts` — Express app; serves static frontend + API routes
+- `artifacts/api-server/src/index.ts` — server entry point; calls `initializeDatabase()` on boot
 - `artifacts/api-server/src/lib/payd.ts` — Payd API client (Basic Auth)
 - `artifacts/api-server/src/routes/payd.ts` — Payd proxy routes
-- `artifacts/api-server/src/routes/index.ts` — route registry
-- `artifacts/dashboard/src/pages/` — dashboard, payin, payout, transactions pages
-- `lib/api-spec/openapi.yaml` — OpenAPI spec (source of truth for API contract)
+- `artifacts/api-server/src/routes/settings.ts` — credential management routes
+- `artifacts/api-server/src/routes/auth.ts` — register / login / logout / me
+- `artifacts/api-server/src/middlewares/auth.ts` — JWT middleware (`requireAuth`)
+- `lib/db/src/index.ts` — DB client + `initializeDatabase()` auto-setup
+- `lib/db/src/schema/` — Drizzle table definitions
+- `artifacts/dashboard/src/pages/` — dashboard, payin, payout, transactions, settings pages
+- `lib/api-spec/openapi.yaml` — OpenAPI spec (source of truth)
 - `lib/api-client-react/` — generated React Query hooks
-- `lib/api-zod/` — generated Zod schemas
 
 ## Architecture decisions
 
-- **Static files served from API server**: The built dashboard `dist/public/` is served by the Express API server at `/`. This avoids the need for a separate Vite dev server to be registered with the proxy.
-- **Basic Auth only**: Payd API uses HTTP Basic Auth (`Authorization: Basic base64(username:password)`). No token exchange or OTP flow needed for API key credentials.
-- **All Payd paths use `/api/` prefix**: The base URL is `https://api.payd.money` but all endpoints include `/api/v1/` or `/api/v2/` prefix (e.g. `/api/v1/accounts/{username}/all_balances`).
-- **Webhook endpoint registered**: `POST /api/webhook/payd` receives Payd transaction callbacks. The callback URL is auto-derived from `REPLIT_DOMAINS` or `REPLIT_DEV_DOMAIN`.
-- **Transactions list not available in Payd API**: There is no documented list-transactions endpoint. The transactions page gracefully shows empty state.
-
-## Product
-
-- **Dashboard**: Live KES and USD wallet balances, recent activity summary
-- **Deposit (Payin)**: M-Pesa STK push to collect funds from a customer's phone
-- **Withdraw (Payout)**: Send money to an M-Pesa wallet via `/api/v2/withdrawal`
-- **Transactions**: Lists available transaction history (empty until Payd exposes a list endpoint)
-
-## User preferences
-
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- **Static files served from API server**: The built dashboard `dist/public/` is served by Express at `/`. Rebuild the dashboard after any frontend change.
+- **Auto DB setup on boot**: `initializeDatabase()` in `lib/db/src/index.ts` runs every startup. All SQL uses `IF NOT EXISTS` guards — safe and idempotent on every restart.
+- **Auth**: JWT stored in an HttpOnly cookie (`payd_session`, 7-day expiry). All data is scoped per user — each registered user has their own isolated credentials and transaction history.
+- **Basic Auth to Payd**: Payd API uses HTTP Basic Auth (`Authorization: Basic base64(username:password)`). No token exchange needed.
+- **Webhook endpoint**: `POST /api/webhook/payd` receives Payd transaction callbacks. Callback URL is auto-derived from `REPLIT_DOMAINS` or `REPLIT_DEV_DOMAIN`.
 
 ## Gotchas
 
-- **Credential resolution order**: `getActivePaydClient()` / `getPaydClient()` (in `lib/payd.ts`) read the active row from the `credentials` Postgres table first, then fall back to the `PAYD_*` **Netlify environment variables** (`getEnvCredentials()`). Env vars are the always-persistent, server-side store — set them in Site settings → Environment variables (or `netlify env:set`) for credentials that survive every deploy without touching the database. Writing credentials to a file at runtime is NOT viable: Netlify Functions run on a read-only, per-instance ephemeral filesystem.
-- The `credentials` table is created by a migration in `netlify/database/migrations/`, applied automatically by Netlify on deploy. Until that migration is applied, saving via the UI returns a 503 with guidance to use the env vars instead.
-- Dashboard must be **rebuilt** after any frontend change: `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build`
-- Then **restart the API server workflow** so it serves the new `dist/public/` files.
-- The `PAYD_USERNAME` and `PAYD_PASSWORD` are API key credentials (not your Payd account login). Generated from Profile → API Keys in the Payd web app.
-- `PAYD_ACCOUNT_USERNAME` is the **Payd profile username** (e.g. `techlink`) — distinct from the API key username. It must appear in payment request bodies as the `username` field. Without it, Payd returns HTTP 415 "error getting user".
-- `PAYD_API_SECRET` is currently unused — Payd's Basic Auth only needs username + password.
-- Phone numbers for M-Pesa must start with `0` and be exactly 10 digits (e.g. `0712345678`).
-- **Payouts return "Unable to process payouts"** — this is a Payd account-side restriction (KYC / payout permission not yet enabled on the account), not a code issue. The request is being sent correctly with all required fields.
+- Dashboard must be **rebuilt** after any frontend change: `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build`, then restart the API server workflow.
+- `PAYD_USERNAME` / `PAYD_PASSWORD` are API key credentials (not your Payd account login). Generate from Profile → API Keys in the Payd web app.
+- `PAYD_ACCOUNT_USERNAME` is the Payd profile username (e.g. `techlink`), distinct from the API key username.
+- Phone numbers for M-Pesa must start with `254` and be in international format (e.g. `254712345678`).
+- Payouts may return errors outside of permitted operating hours — this is normal Payd API behaviour.
 
-## Pointers
+## User preferences
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
-- Payd API docs: https://payd.money (Profile → API Keys to generate credentials)
+- Keep all implementation changes minimal and targeted — no rewrites unless explicitly asked.
+- The system is already fully built. When asked to add a feature that already exists, confirm it exists rather than rebuilding it.
