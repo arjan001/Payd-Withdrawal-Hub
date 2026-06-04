@@ -143,6 +143,33 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
   }
 });
 
+// PATCH /api/settings/credentials/withdrawals — toggle withdrawals on/off for the logged-in user
+router.patch("/settings/credentials/withdrawals", async (req: Request, res: Response): Promise<void> => {
+  const userId = (req as AuthRequest).user.userId;
+  try {
+    const body = req.body as Record<string, unknown>;
+    if (typeof body["enabled"] !== "boolean") {
+      res.status(400).json({ error: "Body must include { enabled: boolean }" });
+      return;
+    }
+    await ensureCredentialsTable();
+    const result = await db
+      .update(credentialsTable)
+      .set({ withdrawalsEnabled: body["enabled"] as boolean, updatedAt: new Date() })
+      .where(eq(credentialsTable.userId, userId))
+      .returning();
+    if (!result[0]) {
+      res.status(404).json({ error: "No credentials found for this user" });
+      return;
+    }
+    req.log.info({ userId, enabled: body["enabled"] }, "Withdrawals toggle updated");
+    res.json({ withdrawals_enabled: result[0].withdrawalsEnabled });
+  } catch (err) {
+    req.log.error({ err }, "Failed to toggle withdrawals");
+    res.status(500).json({ error: "Failed to toggle withdrawals", message: String(err) });
+  }
+});
+
 // DELETE /api/settings/credentials — remove the logged-in user's credentials
 router.delete("/settings/credentials", async (req: Request, res: Response): Promise<void> => {
   const userId = (req as AuthRequest).user.userId;

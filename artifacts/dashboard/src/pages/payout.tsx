@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowUpRight, Loader2, Phone, XCircle } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, Loader2, Phone, XCircle } from "lucide-react";
 
 const payoutSchema = z.object({
   phone_number: z.string().min(9, "Valid phone number required (e.g. 254712345678)"),
@@ -28,6 +28,8 @@ type PayoutFormValues = z.infer<typeof payoutSchema>;
 export default function Payout() {
   const [processing, setProcessing] = useState(false);
   const [failedOpen, setFailedOpen] = useState(false);
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [successRef, setSuccessRef] = useState<string>("");
 
   const form = useForm<PayoutFormValues>({
     resolver: zodResolver(payoutSchema),
@@ -38,12 +40,35 @@ export default function Payout() {
     },
   });
 
-  const onSubmit = (_data: PayoutFormValues) => {
+  const onSubmit = async (data: PayoutFormValues) => {
     setProcessing(true);
-    setTimeout(() => {
-      setProcessing(false);
+    try {
+      const res = await fetch("/api/payd/payout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone_number: data.phone_number,
+          amount: data.amount,
+          narration: data.narration || undefined,
+        }),
+      });
+
+      const json = await res.json() as { reference?: string; message?: string };
+
+      if (!res.ok) {
+        // Always show the same generic error regardless of the server reason
+        setFailedOpen(true);
+        return;
+      }
+
+      setSuccessRef(json.reference ?? "");
+      setSuccessOpen(true);
+      form.reset();
+    } catch {
       setFailedOpen(true);
-    }, 1800);
+    } finally {
+      setProcessing(false);
+    }
   };
 
   return (
@@ -134,6 +159,7 @@ export default function Payout() {
         </CardContent>
       </Card>
 
+      {/* Generic failure dialog — shown for ANY error including disabled withdrawals */}
       <AlertDialog open={failedOpen} onOpenChange={setFailedOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -147,6 +173,29 @@ export default function Payout() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogAction>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Success dialog */}
+      <AlertDialog open={successOpen} onOpenChange={setSuccessOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-primary">
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
+              Withdrawal Initiated
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Your withdrawal has been submitted successfully.
+              {successRef && (
+                <span className="block mt-2 font-mono text-xs text-foreground">
+                  Reference: {successRef}
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>Done</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

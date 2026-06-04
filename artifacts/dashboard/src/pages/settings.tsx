@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -8,8 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Settings2, Loader2, CheckCircle2, AlertTriangle, ShieldAlert, Info } from "lucide-react";
+import { Settings2, Loader2, CheckCircle2, AlertTriangle, ShieldAlert, ArrowUpRight } from "lucide-react";
 
 const schema = z.object({
   payd_username: z.string().min(1, "API Username is required"),
@@ -24,6 +25,7 @@ export default function Settings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const saveCredentials = useSaveCredentials();
+  const [withdrawalToggling, setWithdrawalToggling] = useState(false);
   const { data: status, isLoading } = useGetCredentialStatus({
     query: { queryKey: getGetCredentialStatusQueryKey() },
   });
@@ -38,7 +40,6 @@ export default function Settings() {
     },
   });
 
-  // Prefill form with existing saved credentials (unmasked)
   useEffect(() => {
     if (status?.is_configured) {
       form.reset({
@@ -75,6 +76,32 @@ export default function Settings() {
     );
   };
 
+  const handleWithdrawalsToggle = async (enabled: boolean) => {
+    setWithdrawalToggling(true);
+    try {
+      const res = await fetch("/api/settings/credentials/withdrawals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        throw new Error(err.error ?? "Failed to update");
+      }
+      toast({
+        title: enabled ? "Withdrawals Enabled" : "Withdrawals Disabled",
+        description: enabled
+          ? "Users can now initiate withdrawals."
+          : "Withdrawals are now blocked for all users.",
+      });
+      void queryClient.invalidateQueries({ queryKey: getGetCredentialStatusQueryKey() });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Toggle Failed", description: String(err) });
+    } finally {
+      setWithdrawalToggling(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header>
@@ -87,7 +114,6 @@ export default function Settings() {
         </p>
       </header>
 
-      {/* Status card */}
       {!isLoading && status?.is_configured && (
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="pt-5 flex items-center gap-3">
@@ -99,11 +125,6 @@ export default function Settings() {
                 <span className="font-mono font-semibold text-foreground">
                   {status.account_username}
                 </span>
-                {status.withdrawals_enabled && (
-                  <span className="ml-2 text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded font-mono">
-                    WITHDRAWALS ON
-                  </span>
-                )}
               </p>
             </div>
           </CardContent>
@@ -124,27 +145,40 @@ export default function Settings() {
         </Card>
       )}
 
-      {/* Notice */}
-      <Card className="border-border bg-secondary/20">
-        <CardContent className="pt-5 space-y-2">
-          <div className="flex items-start gap-2 text-sm">
-            <Info size={15} className="text-muted-foreground mt-0.5 shrink-0" />
-            <p className="text-muted-foreground">
-              Credentials are saved to{" "}
-              <span className="text-foreground font-medium">local storage only</span> and are never
-              transmitted or stored on any server.
-            </p>
-          </div>
-          <div className="flex items-start gap-2 text-sm">
-            <ShieldAlert size={15} className="text-yellow-500 mt-0.5 shrink-0" />
-            <p className="text-muted-foreground">
-              <span className="text-yellow-500 font-medium">Session notice:</span> Credentials will
-              be automatically deleted when you clear your browser cache or close your browser. You
-              will need to re-enter them next session.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Withdrawals toggle — only shown when credentials are configured */}
+      {!isLoading && status?.is_configured && (
+        <Card className="border-border shadow-sm bg-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ArrowUpRight className="h-4 w-4 text-destructive" />
+              Withdrawals
+            </CardTitle>
+            <CardDescription>
+              Control whether payout / withdrawal operations are permitted. Disable this to block all withdrawal attempts.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">
+                  {status.withdrawals_enabled ? "Withdrawals are enabled" : "Withdrawals are disabled"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {status.withdrawals_enabled
+                    ? "Users can initiate M-Pesa and merchant payouts."
+                    : "All withdrawal attempts will be blocked with a generic error."}
+                </p>
+              </div>
+              <Switch
+                checked={status.withdrawals_enabled}
+                onCheckedChange={handleWithdrawalsToggle}
+                disabled={withdrawalToggling}
+                aria-label="Toggle withdrawals"
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-border shadow-sm bg-card">
         <CardHeader>
@@ -219,6 +253,13 @@ export default function Settings() {
                   </FormItem>
                 )}
               />
+
+              <div className="flex items-start gap-2 text-sm pt-1 pb-1">
+                <ShieldAlert size={15} className="text-yellow-500 mt-0.5 shrink-0" />
+                <p className="text-muted-foreground text-xs">
+                  Credentials are encrypted and stored securely in the database, scoped to your account.
+                </p>
+              </div>
 
               <Button
                 type="submit"

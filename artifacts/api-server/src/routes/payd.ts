@@ -240,7 +240,7 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
     return;
   }
   if (!client.withdrawalsEnabled) {
-    res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+    res.status(422).json({ error: "Withdrawals disabled", message: "Unable to process the withdrawal at this time. Please try again later." });
     return;
   }
 
@@ -314,7 +314,7 @@ router.post("/payd/merchant", async (req: Request, res: Response): Promise<void>
     return;
   }
   if (!client.withdrawalsEnabled) {
-    res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+    res.status(422).json({ error: "Withdrawals disabled", message: "Unable to process the withdrawal at this time. Please try again later." });
     return;
   }
 
@@ -396,7 +396,7 @@ router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
     return;
   }
   if (!client.withdrawalsEnabled) {
-    res.status(422).json({ error: "Payout declined", message: "Payout declined by Payd. Please contact support." });
+    res.status(422).json({ error: "Withdrawals disabled", message: "Unable to process the withdrawal at this time. Please try again later." });
     return;
   }
 
