@@ -1,4 +1,5 @@
 import { useState, useEffect, createContext, useContext, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -181,6 +182,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const publicPath = isPublicPath();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checking, setChecking] = useState(!publicPath);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (publicPath) return;
@@ -210,7 +212,16 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    return <AuthScreen onLogin={(u) => setUser(u)} />;
+    return (
+      <AuthScreen
+        onLogin={(u) => {
+          // Flush all cached query data so every dashboard query
+          // refetches immediately under the new authenticated session.
+          void queryClient.invalidateQueries();
+          setUser(u);
+        }}
+      />
+    );
   }
 
   return (

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useSaveCredentials, useGetCredentialStatus, getGetCredentialStatusQueryKey } from "@workspace/api-client-react";
+import { useSaveCredentials, useGetCredentialStatus, getGetCredentialStatusQueryKey, getGetAccountQueryKey, getGetSummaryQueryKey, getGetTransactionsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -68,7 +68,12 @@ export default function CredentialsPrompt() {
             title: "Credentials Saved",
             description: `Connected as ${result.account_username ?? data.payd_account_username}`,
           });
+          // Invalidate credentials status + all data queries so the dashboard
+          // immediately fetches real balances and transactions with the new credentials.
           void queryClient.invalidateQueries({ queryKey: getGetCredentialStatusQueryKey() });
+          void queryClient.invalidateQueries({ queryKey: getGetAccountQueryKey() });
+          void queryClient.invalidateQueries({ queryKey: getGetSummaryQueryKey() });
+          void queryClient.invalidateQueries({ queryKey: getGetTransactionsQueryKey() });
           setOpen(false);
         },
         onError: (error) => {
