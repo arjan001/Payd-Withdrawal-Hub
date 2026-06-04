@@ -1,21 +1,41 @@
+import { useState } from "react";
 import { 
   useGetSummary, 
   getGetSummaryQueryKey,
   useGetAccount,
   getGetAccountQueryKey,
   useGetTransactions,
-  getGetTransactionsQueryKey
+  getGetTransactionsQueryKey,
+  useGetCredentialStatus,
+  getGetCredentialStatusQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { ArrowDownLeft, ArrowUpRight, Activity, Wallet, ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Activity, Wallet, ArrowRight, RefreshCw, Info, X } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
+
+const ALERT_DISMISSED_KEY = "payd_withdrawal_limit_alert_dismissed";
 
 const REFETCH_INTERVAL = 30_000;
 
 export default function Dashboard() {
+  const [alertDismissed, setAlertDismissed] = useState<boolean>(
+    () => localStorage.getItem(ALERT_DISMISSED_KEY) === "true"
+  );
+
+  const { data: credStatus } = useGetCredentialStatus({
+    query: { queryKey: getGetCredentialStatusQueryKey() },
+  });
+
+  const showAlert = !alertDismissed && credStatus?.is_configured === true;
+
+  function dismissAlert() {
+    localStorage.setItem(ALERT_DISMISSED_KEY, "true");
+    setAlertDismissed(true);
+  }
+
   const { data: summary, isLoading: loadingSummary, refetch: refetchSummary } = useGetSummary({
     query: { queryKey: getGetSummaryQueryKey(), refetchInterval: REFETCH_INTERVAL }
   });
@@ -46,6 +66,26 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+
+      {showAlert && (
+        <div className="flex items-start gap-3 rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-sm text-blue-300">
+          <Info className="h-4 w-4 mt-0.5 shrink-0 text-blue-400" />
+          <p className="flex-1 leading-relaxed">
+            <span className="font-semibold text-blue-200">Daily withdrawal limit: </span>
+            API withdrawals are limited to{" "}
+            <span className="font-mono font-semibold text-blue-100">KES 10,000</span>{" "}
+            per day.
+          </p>
+          <button
+            onClick={dismissAlert}
+            aria-label="Dismiss"
+            className="shrink-0 text-blue-400 hover:text-blue-200 transition-colors mt-0.5"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
