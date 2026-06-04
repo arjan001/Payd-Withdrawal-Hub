@@ -28,6 +28,8 @@ export function verifyToken(token: string): SessionPayload | null {
   }
 }
 
+export type AuthRequest = Request & { user: SessionPayload };
+
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const token = req.cookies[SESSION_COOKIE] as string | undefined;
   if (!token) {
@@ -40,6 +42,6 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     res.status(401).json({ error: "Session expired" });
     return;
   }
-  (req as Request & { user: SessionPayload }).user = payload;
+  (req as AuthRequest).user = payload;
   next();
 }

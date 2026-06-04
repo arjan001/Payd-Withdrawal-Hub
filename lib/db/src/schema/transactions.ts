@@ -1,9 +1,11 @@
 import { pgTable, serial, text, numeric, integer, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { usersTable } from "./users";
 
 export const transactionsTable = pgTable("transactions", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => usersTable.id),
   reference: text("reference").unique(),
   correlatorId: text("correlator_id").unique(),
   type: text("type").notNull(),

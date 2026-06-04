@@ -55,18 +55,28 @@ function rowToCredentials(row: typeof credentialsTable.$inferSelect): PaydUserCr
 }
 
 /**
- * Credentials supplied through Netlify environment variables. This is the
- * persistent, server-side credential store the platform offers: the values are
- * set once (Site settings → Environment variables, or `netlify env:set`) and
- * survive every deploy and every function cold start — no ephemeral file or
- * database row required. It is used as a fallback so the dashboard keeps
- * working even before any credentials are saved through the UI (and regardless
- * of database state).
- *
- *   PAYD_USERNAME          – API key username
- *   PAYD_PASSWORD          – API key password
- *   PAYD_API_SECRET        – API secret (optional; Basic Auth does not use it)
- *   PAYD_ACCOUNT_USERNAME  – Payd profile username (falls back to PAYD_USERNAME)
+ * Returns the Payd client for a specific logged-in user (by their user_id).
+ * This is the primary credential lookup for all multi-tenant API operations.
+ */
+export async function getPaydClientForUser(userId: number): Promise<PaydClient | null> {
+  try {
+    await ensureCredentialsTable();
+    const rows = await db
+      .select()
+      .from(credentialsTable)
+      .where(eq(credentialsTable.userId, userId))
+      .limit(1);
+    const row = rows[0];
+    if (row) return buildClient(rowToCredentials(row));
+  } catch (err) {
+    logger.warn({ err, userId }, "Failed to read credentials from DB for user");
+  }
+  return null;
+}
+
+/**
+ * Credentials supplied through environment variables. Used as a fallback
+ * on the /test admin panel and legacy paths only.
  */
 export function getEnvCredentials(): PaydUserCredentials | null {
   const username = process.env["PAYD_USERNAME"];
@@ -77,17 +87,40 @@ export function getEnvCredentials(): PaydUserCredentials | null {
     username,
     password,
     accountUsername,
-    // Env-provided credentials are operator-set, so treat them as the live,
-    // withdrawal-enabled account.
     withdrawalsEnabled: true,
     isActive: true,
   };
 }
 
 /**
- * Returns the system-wide active Payd client (used for balance / payin).
- * Falls back to credentials supplied via environment variables, and returns
- * null only when no credentials are available from either source.
+ * @deprecated Use getPaydClientForUser(userId) instead.
+ * Kept for the admin /test panel which still uses account-based lookup.
+ */
+export async function getPaydClient(accountUsername?: string): Promise<PaydClient | null> {
+  if (accountUsername) {
+    try {
+      await ensureCredentialsTable();
+      const rows = await db
+        .select()
+        .from(credentialsTable)
+        .where(eq(credentialsTable.paydAccountUsername, accountUsername))
+        .limit(1);
+      const row = rows[0];
+      if (row) return buildClient(rowToCredentials(row));
+    } catch (err) {
+      logger.warn({ err }, "Failed to read credentials from DB for account", accountUsername);
+    }
+  }
+  const envCreds = getEnvCredentials();
+  if (envCreds && (!accountUsername || envCreds.accountUsername === accountUsername)) {
+    return buildClient(envCreds);
+  }
+  return null;
+}
+
+/**
+ * @deprecated Use getPaydClientForUser(userId) instead.
+ * Kept for backward compatibility; returns the first active credential row.
  */
 export async function getActivePaydClient(): Promise<PaydClient | null> {
   try {
@@ -107,35 +140,6 @@ export async function getActivePaydClient(): Promise<PaydClient | null> {
   return null;
 }
 
-/**
- * Returns a Payd client for a specific account username (used for withdrawals).
- * Falls back to environment-variable credentials when the database has no
- * matching row. Returns null if no credentials can be resolved.
- */
-export async function getPaydClient(accountUsername?: string): Promise<PaydClient | null> {
-  if (accountUsername) {
-    try {
-      await ensureCredentialsTable();
-      const rows = await db
-        .select()
-        .from(credentialsTable)
-        .where(eq(credentialsTable.paydAccountUsername, accountUsername))
-        .limit(1);
-      const row = rows[0];
-      if (row) return buildClient(rowToCredentials(row));
-    } catch (err) {
-      logger.warn({ err }, "Failed to read credentials from DB for user", accountUsername);
-    }
-  }
-  // Fall back to env credentials when they match the requested account (or when
-  // no specific account was requested).
-  const envCreds = getEnvCredentials();
-  if (envCreds && (!accountUsername || envCreds.accountUsername === accountUsername)) {
-    return buildClient(envCreds);
-  }
-  return null;
-}
-
 export function getCallbackBase(): string {
   const domains = process.env["REPLIT_DOMAINS"];
   if (domains) {
@@ -144,7 +148,6 @@ export function getCallbackBase(): string {
   }
   const devDomain = process.env["REPLIT_DEV_DOMAIN"];
   if (devDomain) return `https://${devDomain}`;
-  // Netlify exposes the deployed site URL via the URL env var.
   const netlifyUrl = process.env["URL"];
   if (netlifyUrl) return netlifyUrl.replace(/\/+$/, "");
   return "https://localhost";

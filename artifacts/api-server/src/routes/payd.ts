@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import axios from "axios";
-import { desc, eq, count, sum, or } from "drizzle-orm";
+import { desc, eq, count, sum, or, and } from "drizzle-orm";
 import {
   GetAccountResponse,
   GetTransactionsQueryParams,
@@ -17,16 +17,11 @@ import {
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
 import { db, transactionsTable } from "@workspace/db";
-import { getPaydClient, getActivePaydClient, getCallbackBase } from "../lib/payd";
+import { getPaydClientForUser, getCallbackBase } from "../lib/payd";
 import { logger } from "../lib/logger";
+import { type AuthRequest } from "../middlewares/auth";
 
 const router: IRouter = Router();
-
-const COOKIE_NAME = "payd_user";
-
-function getPaydUser(req: Request): string | undefined {
-  return req.cookies[COOKIE_NAME] as string | undefined;
-}
 
 function paydError(err: unknown): { status: number; message: string } {
   if (axios.isAxiosError(err)) {
@@ -49,10 +44,11 @@ function paydError(err: unknown): { status: number; message: string } {
   return { status: 500, message: String(err) };
 }
 
-// GET /api/payd/account — fetch balances using active credentials
+// GET /api/payd/account — fetch balances using the logged-in user's credentials
 router.get("/payd/account", async (req: Request, res: Response): Promise<void> => {
+  const userId = (req as AuthRequest).user.userId;
   try {
-    const client = await getActivePaydClient();
+    const client = await getPaydClientForUser(userId);
 
     if (!client) {
       res.json({
@@ -117,8 +113,9 @@ router.get("/payd/account", async (req: Request, res: Response): Promise<void> =
   }
 });
 
-// GET /api/payd/transactions — list from local DB with pagination
+// GET /api/payd/transactions — list from local DB scoped to logged-in user
 router.get("/payd/transactions", async (req: Request, res: Response): Promise<void> => {
+  const userId = (req as AuthRequest).user.userId;
   try {
     const parsed = GetTransactionsQueryParams.safeParse(req.query);
     const page = parsed.success ? (parsed.data.page ?? 1) : 1;
@@ -129,10 +126,14 @@ router.get("/payd/transactions", async (req: Request, res: Response): Promise<vo
       db
         .select()
         .from(transactionsTable)
+        .where(eq(transactionsTable.userId, userId))
         .orderBy(desc(transactionsTable.createdAt))
         .limit(limit)
         .offset(offset),
-      db.select({ value: count() }).from(transactionsTable),
+      db
+        .select({ value: count() })
+        .from(transactionsTable)
+        .where(eq(transactionsTable.userId, userId)),
     ]);
 
     const total = Number(totalRows[0]?.value ?? 0);
@@ -158,13 +159,14 @@ router.get("/payd/transactions", async (req: Request, res: Response): Promise<vo
   }
 });
 
-// POST /api/payd/payin — M-Pesa STK push using active credentials
+// POST /api/payd/payin — M-Pesa STK push using the logged-in user's credentials
 router.post("/payd/payin", async (req: Request, res: Response): Promise<void> => {
-  const client = await getActivePaydClient();
+  const userId = (req as AuthRequest).user.userId;
+  const client = await getPaydClientForUser(userId);
   if (!client) {
     res.status(422).json({
-      error: "No active credentials",
-      message: "No active credentials are configured. An admin must activate credentials at /test before deposits can be made.",
+      error: "No credentials configured",
+      message: "Set up your Payd API credentials in Settings before initiating a deposit.",
     });
     return;
   }
@@ -197,6 +199,7 @@ router.post("/payd/payin", async (req: Request, res: Response): Promise<void> =>
 
     try {
       await db.insert(transactionsTable).values({
+        userId,
         reference: txRef ?? undefined,
         type: "payin",
         status: success ? "pending" : "failed",
@@ -225,9 +228,10 @@ router.post("/payd/payin", async (req: Request, res: Response): Promise<void> =>
   }
 });
 
-// POST /api/payd/payout — M-Pesa withdrawal
+// POST /api/payd/payout — M-Pesa withdrawal using the logged-in user's credentials
 router.post("/payd/payout", async (req: Request, res: Response): Promise<void> => {
-  const client = await getPaydClient(getPaydUser(req));
+  const userId = (req as AuthRequest).user.userId;
+  const client = await getPaydClientForUser(userId);
   if (!client) {
     res.status(422).json({
       error: "Credentials not configured",
@@ -269,6 +273,7 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
 
     try {
       await db.insert(transactionsTable).values({
+        userId,
         reference: txRef ?? undefined,
         correlatorId: correlatorId ?? undefined,
         type: "payout",
@@ -299,7 +304,8 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
 
 // POST /api/payd/merchant — Pay to Paybill or Till
 router.post("/payd/merchant", async (req: Request, res: Response): Promise<void> => {
-  const client = await getPaydClient(getPaydUser(req));
+  const userId = (req as AuthRequest).user.userId;
+  const client = await getPaydClientForUser(userId);
   if (!client) {
     res.status(422).json({
       error: "Credentials not configured",
@@ -345,6 +351,7 @@ router.post("/payd/merchant", async (req: Request, res: Response): Promise<void>
 
     try {
       await db.insert(transactionsTable).values({
+        userId,
         reference: txRef ?? undefined,
         correlatorId: correlatorId ?? undefined,
         type: "merchant",
@@ -379,7 +386,8 @@ router.post("/payd/merchant", async (req: Request, res: Response): Promise<void>
 
 // POST /api/payd/p2p — Payd-to-Payd transfer
 router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
-  const client = await getPaydClient(getPaydUser(req));
+  const userId = (req as AuthRequest).user.userId;
+  const client = await getPaydClientForUser(userId);
   if (!client) {
     res.status(422).json({
       error: "Credentials not configured",
@@ -416,6 +424,7 @@ router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
 
     try {
       await db.insert(transactionsTable).values({
+        userId,
         reference: txRef ?? undefined,
         type: "p2p",
         status: success ? "success" : "failed",
@@ -447,7 +456,8 @@ router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
 
 // GET /api/payd/tx-status/:reference
 router.get("/payd/tx-status/:reference", async (req: Request, res: Response): Promise<void> => {
-  const client = await getPaydClient(getPaydUser(req));
+  const userId = (req as AuthRequest).user.userId;
+  const client = await getPaydClientForUser(userId);
   if (!client) {
     res.status(422).json({ error: "Credentials not configured", message: "Please set up your credentials in Settings." });
     return;
@@ -473,9 +483,12 @@ router.get("/payd/tx-status/:reference", async (req: Request, res: Response): Pr
           .update(transactionsTable)
           .set({ status: detailStatus, remarks: (details?.["reason"] ?? null) as string | null })
           .where(
-            or(
-              eq(transactionsTable.reference, reference),
-              eq(transactionsTable.correlatorId, reference),
+            and(
+              eq(transactionsTable.userId, userId),
+              or(
+                eq(transactionsTable.reference, reference),
+                eq(transactionsTable.correlatorId, reference),
+              ),
             ),
           );
       } catch (dbErr) {
@@ -515,25 +528,32 @@ router.get("/payd/tx-status/:reference", async (req: Request, res: Response): Pr
   }
 });
 
-// GET /api/payd/summary — derived from local DB
+// GET /api/payd/summary — derived from logged-in user's transactions only
 router.get("/payd/summary", async (req: Request, res: Response): Promise<void> => {
+  const userId = (req as AuthRequest).user.userId;
   try {
     const [payinStats, payoutStats, totalCount] = await Promise.all([
       db
         .select({ total: sum(transactionsTable.amount), cnt: count() })
         .from(transactionsTable)
-        .where(eq(transactionsTable.type, "payin")),
+        .where(and(eq(transactionsTable.userId, userId), eq(transactionsTable.type, "payin"))),
       db
         .select({ total: sum(transactionsTable.amount), cnt: count() })
         .from(transactionsTable)
         .where(
-          or(
-            eq(transactionsTable.type, "payout"),
-            eq(transactionsTable.type, "merchant"),
-            eq(transactionsTable.type, "p2p"),
+          and(
+            eq(transactionsTable.userId, userId),
+            or(
+              eq(transactionsTable.type, "payout"),
+              eq(transactionsTable.type, "merchant"),
+              eq(transactionsTable.type, "p2p"),
+            ),
           ),
         ),
-      db.select({ cnt: count() }).from(transactionsTable),
+      db
+        .select({ cnt: count() })
+        .from(transactionsTable)
+        .where(eq(transactionsTable.userId, userId)),
     ]);
 
     res.json(
@@ -553,7 +573,7 @@ router.get("/payd/summary", async (req: Request, res: Response): Promise<void> =
   }
 });
 
-// POST /api/webhook/payd — receive Payd transaction webhooks
+// POST /api/webhook/payd — receive Payd transaction webhooks (public, no auth)
 router.post("/webhook/payd", async (_req: Request, res: Response): Promise<void> => {
   const payload = _req.body as Record<string, unknown>;
   logger.info({ payload }, "Payd webhook received");

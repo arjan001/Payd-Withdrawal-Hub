@@ -1,0 +1,3 @@
+- [Multi-tenancy architecture](multi-tenancy.md) — credentials and transactions are scoped per user_id; never use payd_user cookie or getActivePaydClient() for authenticated routes
+- [Dashboard static build](dashboard-build.md) — dashboard runs from API server's static dist/, not Vite dev server; source changes require a rebuild to take effect
+- [Auth middleware](auth-middleware.md) — JWT in HttpOnly cookie `payd_session`; use AuthRequest type and req.user.userId in protected routes
