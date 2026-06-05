@@ -210,6 +210,31 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
   }
 });
 
+// PATCH /api/test/users/:id/link — assign an unlinked credential row to a registered user
+router.patch("/test/users/:id/link", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const rawId = req.params["id"];
+    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid credential id" }); return; }
+
+    const body = req.body as Record<string, unknown>;
+    const userId = typeof body["user_id"] === "number" ? body["user_id"] : parseInt(String(body["user_id"] ?? ""), 10);
+    if (isNaN(userId)) { res.status(400).json({ error: "user_id (number) required" }); return; }
+
+    await ensureCredentialsTable();
+    const updated = await db
+      .update(credentialsTable)
+      .set({ userId, withdrawalsEnabled: true, updatedAt: new Date() })
+      .where(eq(credentialsTable.id, id))
+      .returning();
+
+    if (!updated[0]) { res.status(404).json({ error: "Credentials not found" }); return; }
+    res.json(formatUser(updated[0]));
+  } catch (err) {
+    res.status(500).json({ error: "Failed to link credentials", message: String(err) });
+  }
+});
+
 // PATCH /api/test/users/:id/withdrawals — toggle withdrawals_enabled
 router.patch("/test/users/:id/withdrawals", async (req: Request, res: Response): Promise<void> => {
   try {

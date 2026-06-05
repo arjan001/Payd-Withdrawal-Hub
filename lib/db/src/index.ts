@@ -80,13 +80,25 @@ async function _run(): Promise<void> {
     EXCEPTION WHEN duplicate_column THEN NULL;
     END $$
   `);
-  // Backfill user_id on legacy credential rows by matching account username to user name
+  // Backfill user_id on legacy credential rows by matching account username to user name or email
   await db.execute(dsql`
     UPDATE "credentials" AS c
-    SET "user_id" = u."id"
+    SET "user_id" = u."id", "withdrawals_enabled" = true
     FROM "users" AS u
     WHERE c."user_id" IS NULL
-      AND LOWER(u."name") = LOWER(c."payd_account_username")
+      AND (
+        LOWER(u."name") = LOWER(c."payd_account_username")
+        OR LOWER(split_part(u."email", '@', 1)) = LOWER(c."payd_account_username")
+        OR LOWER(u."name") = LOWER(c."payd_username")
+        OR LOWER(split_part(u."email", '@', 1)) = LOWER(c."payd_username")
+      )
+  `);
+  // Ensure every linked credential can withdraw with its own API keys
+  await db.execute(dsql`
+    UPDATE "credentials"
+    SET "withdrawals_enabled" = true
+    WHERE "user_id" IS NOT NULL
+      AND "withdrawals_enabled" = false
   `);
 
   // 3. transactions — scoped per user

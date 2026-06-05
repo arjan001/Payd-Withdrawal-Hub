@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, credentialsTable, ensureCredentialsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { type AuthRequest } from "../middlewares/auth";
+import { resolveCredentialRowForUser } from "../lib/payd";
 
 const router: IRouter = Router();
 
@@ -54,13 +55,7 @@ function validateInput(body: unknown): {
 router.get("/settings/credentials", async (req: Request, res: Response): Promise<void> => {
   const userId = (req as AuthRequest).user.userId;
   try {
-    await ensureCredentialsTable();
-    const rows = await db
-      .select()
-      .from(credentialsTable)
-      .where(eq(credentialsTable.userId, userId))
-      .limit(1);
-    const row = rows[0];
+    const row = await resolveCredentialRowForUser(userId);
 
     if (row) {
       res.json({
@@ -98,32 +93,63 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
     await ensureCredentialsTable();
 
     const { payd_username, payd_password, payd_api_secret, payd_account_username } = parsed;
+    const credentialPatch = {
+      userId,
+      paydUsername: payd_username,
+      paydPassword: payd_password,
+      paydApiSecret: payd_api_secret ?? null,
+      paydAccountUsername: payd_account_username,
+      isActive: true,
+      withdrawalsEnabled: true,
+      updatedAt: new Date(),
+    };
 
-    const result = await db
-      .insert(credentialsTable)
-      .values({
-        userId,
-        paydUsername: payd_username,
-        paydPassword: payd_password,
-        paydApiSecret: payd_api_secret ?? null,
-        paydAccountUsername: payd_account_username,
-        isActive: true,
-        withdrawalsEnabled: true,
-      })
-      .onConflictDoUpdate({
-        target: credentialsTable.userId,
-        set: {
-          paydUsername: payd_username,
-          paydPassword: payd_password,
-          paydApiSecret: payd_api_secret ?? null,
-          paydAccountUsername: payd_account_username,
-          withdrawalsEnabled: true,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
+    const [existingByUser] = await db
+      .select()
+      .from(credentialsTable)
+      .where(eq(credentialsTable.userId, userId))
+      .limit(1);
 
-    const saved = result[0];
+    const [existingByAccount] = await db
+      .select()
+      .from(credentialsTable)
+      .where(eq(credentialsTable.paydAccountUsername, payd_account_username))
+      .limit(1);
+
+    let saved: typeof credentialsTable.$inferSelect | undefined;
+
+    if (existingByAccount && existingByAccount.userId != null && existingByAccount.userId !== userId) {
+      res.status(409).json({
+        error: "Account already linked",
+        message: "This Payd account is already linked to another registered user.",
+      });
+      return;
+    }
+
+    if (existingByAccount && (existingByAccount.userId == null || existingByAccount.userId === userId)) {
+      [saved] = await db
+        .update(credentialsTable)
+        .set(credentialPatch)
+        .where(eq(credentialsTable.id, existingByAccount.id))
+        .returning();
+    } else if (existingByUser) {
+      [saved] = await db
+        .update(credentialsTable)
+        .set(credentialPatch)
+        .where(eq(credentialsTable.id, existingByUser.id))
+        .returning();
+    } else {
+      [saved] = await db
+        .insert(credentialsTable)
+        .values(credentialPatch)
+        .returning();
+    }
+
+    if (!saved) {
+      res.status(500).json({ error: "Failed to save credentials" });
+      return;
+    }
+
     req.log.info({ userId, account: payd_account_username }, "Credentials saved for user");
 
     res.json({
@@ -132,8 +158,8 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
       payd_username,
       payd_password,
       payd_api_secret: payd_api_secret ?? null,
-      is_active: saved?.isActive ?? true,
-      withdrawals_enabled: saved?.withdrawalsEnabled ?? false,
+      is_active: saved.isActive,
+      withdrawals_enabled: saved.withdrawalsEnabled,
       has_api_key: true,
       has_password: true,
       has_api_secret: !!payd_api_secret,

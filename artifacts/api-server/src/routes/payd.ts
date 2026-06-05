@@ -207,9 +207,11 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
   const userId = (req as AuthRequest).user.userId;
   const client = await getPaydClientForUser(userId);
   if (!client) {
+    req.log.warn({ userId }, "Payout blocked: no credentials resolved for user");
     res.status(422).json({
       error: "Credentials not configured",
-      message: "Please set up your Payd credentials in Settings before initiating a withdrawal.",
+      message: "No Payd credentials found for your account. Go to Settings, save your API keys, and ensure your Payd account username matches your registration.",
+      success: false,
     });
     return;
   }
@@ -224,6 +226,8 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
     const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } = parsed.data;
     const username = client.accountUsername;
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
+
+    req.log.info({ userId, account: username, amount }, "Initiating payout with user credentials");
 
     const rawData = await client.post<Record<string, unknown>>("/api/v2/withdrawal", {
       username,

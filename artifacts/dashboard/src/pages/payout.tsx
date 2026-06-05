@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useGetAccount } from "@workspace/api-client-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -26,6 +27,7 @@ const payoutSchema = z.object({
 type PayoutFormValues = z.infer<typeof payoutSchema>;
 
 export default function Payout() {
+  const { data: account } = useGetAccount();
   const [processing, setProcessing] = useState(false);
   const [failedOpen, setFailedOpen] = useState(false);
   const [failedMessage, setFailedMessage] = useState("");
@@ -83,6 +85,21 @@ export default function Payout() {
         <p className="text-muted-foreground mt-1 text-sm">
           Send money from your Payd balance directly to a mobile money wallet.
         </p>
+        {account?.connected && account.username && (
+          <p className="text-xs font-mono mt-2 text-primary">
+            Withdrawing from: {account.username}
+            {account.balances[0] != null && (
+              <span className="text-muted-foreground ml-2">
+                (KES {account.balances[0].available_balance.toLocaleString()})
+              </span>
+            )}
+          </p>
+        )}
+        {account && !account.connected && (
+          <p className="text-xs text-yellow-500 mt-2">
+            Credentials not linked to your login — go to Settings and save your Payd API keys.
+          </p>
+        )}
       </header>
 
       <Card className="border-border shadow-sm bg-card border-t-destructive/50">
