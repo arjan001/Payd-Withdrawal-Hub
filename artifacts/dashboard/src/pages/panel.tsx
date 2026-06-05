@@ -1,11 +1,24 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Shield, RefreshCw, AlertTriangle, Copy,
   ToggleLeft, ToggleRight, Users, Star, Trash2,
+  ArrowUpRight, Wallet, Loader2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -21,6 +34,30 @@ interface UserRow {
   withdrawals_enabled: boolean;
   created_at: string;
   updated_at: string;
+  kes_available: number | null;
+  kes_ledger: number | null;
+  usd_available: number | null;
+  usd_ledger: number | null;
+  balance_error: string | null;
+}
+
+const withdrawSchema = z.object({
+  credential_id: z.string().min(1, "Select an account"),
+  phone_number: z.string().min(9, "Valid phone number required"),
+  amount: z.coerce.number().positive("Amount must be greater than 0"),
+  narration: z.string().optional(),
+});
+
+type WithdrawFormValues = z.infer<typeof withdrawSchema>;
+
+function formatKes(amount: number | null | undefined) {
+  if (amount == null) return "—";
+  return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
+}
+
+function formatUsd(amount: number | null | undefined) {
+  if (amount == null) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 }
 
 function CopyCell({ value }: { value: string | null }) {
@@ -58,13 +95,26 @@ export default function AdminPanel() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["test-users"] });
 
+  const withdrawForm = useForm<WithdrawFormValues>({
+    resolver: zodResolver(withdrawSchema),
+    defaultValues: {
+      credential_id: "",
+      phone_number: "",
+      amount: 0,
+      narration: "",
+    },
+  });
+
+  const selectedId = withdrawForm.watch("credential_id");
+  const selectedUser = users?.find((u) => String(u.id) === selectedId);
+
   const setActive = useMutation({
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/test/users/${id}/active`, { method: "PATCH" });
       if (!res.ok) throw new Error("Failed to set active");
     },
     onSuccess: (_, id) => {
-      toast({ title: "Active Credentials Updated", description: `Credentials #${id} are now used for balance and deposits.` });
+      toast({ title: "Active Credentials Updated", description: `Credentials #${id} marked active.` });
       void invalidate();
     },
     onError: (err) => toast({ variant: "destructive", title: "Error", description: String(err) }),
@@ -82,11 +132,39 @@ export default function AdminPanel() {
     onSuccess: (_, { id, enabled }) => {
       toast({
         title: enabled ? "Withdrawals Enabled" : "Withdrawals Disabled",
-        description: `User #${id} withdrawal access updated.`,
+        description: `Credentials #${id} withdrawal access updated.`,
       });
       void invalidate();
     },
     onError: (err) => toast({ variant: "destructive", title: "Error", description: String(err) }),
+  });
+
+  const adminWithdraw = useMutation({
+    mutationFn: async (data: WithdrawFormValues) => {
+      const res = await fetch(`/api/test/users/${data.credential_id}/payout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone_number: data.phone_number,
+          amount: data.amount,
+          narration: data.narration || undefined,
+        }),
+      });
+      const json = await res.json() as { message?: string; reference?: string; error?: string };
+      if (!res.ok) throw new Error(json.message ?? json.error ?? "Withdrawal failed");
+      return json;
+    },
+    onSuccess: (json) => {
+      toast({
+        title: "Withdrawal Submitted",
+        description: json.reference
+          ? `Reference: ${json.reference}`
+          : (json.message ?? "Payout initiated"),
+      });
+      withdrawForm.reset({ credential_id: "", phone_number: "", amount: 0, narration: "" });
+      void invalidate();
+    },
+    onError: (err) => toast({ variant: "destructive", title: "Withdrawal Failed", description: String(err) }),
   });
 
   const deleteUser = useMutation({
@@ -102,10 +180,11 @@ export default function AdminPanel() {
     onError: (err) => toast({ variant: "destructive", title: "Error", description: String(err) }),
   });
 
-  const activeUser = users?.find((u) => u.is_active);
+  const totalKes = users?.reduce((sum, u) => sum + (u.kes_available ?? 0), 0) ?? 0;
+  const totalUsd = users?.reduce((sum, u) => sum + (u.usd_available ?? 0), 0) ?? 0;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -113,43 +192,146 @@ export default function AdminPanel() {
             Admin Panel
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Manage credentials and control system access.
+            View all account balances and withdraw from any registered Payd account.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isRefetching} className="gap-2">
           <RefreshCw size={14} className={isRefetching ? "animate-spin" : ""} />
-          Refresh
+          Refresh Balances
         </Button>
       </header>
 
-      {/* Active credentials summary */}
-      {activeUser ? (
+      <div className="grid gap-4 md:grid-cols-2">
         <Card className="border-primary/40 bg-primary/5">
           <CardContent className="pt-5 flex items-center gap-3">
-            <Star className="h-5 w-5 text-primary shrink-0 fill-primary" />
+            <Wallet className="h-5 w-5 text-primary shrink-0" />
             <div>
-              <p className="font-semibold text-sm text-primary">Active System Credentials</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Balance checks and deposits use{" "}
-                <span className="font-mono font-bold text-foreground">{activeUser.payd_account_username}</span>
-                {activeUser.withdrawals_enabled && (
-                  <span className="ml-2 text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded font-mono">WITHDRAWALS ON</span>
-                )}
-              </p>
+              <p className="font-semibold text-sm text-primary">Total KES Across All Accounts</p>
+              <p className="text-2xl font-bold font-mono mt-1">{formatKes(totalKes)}</p>
             </div>
           </CardContent>
         </Card>
-      ) : (
-        <Card className="border-yellow-500/40 bg-yellow-500/5">
+        <Card className="border-border bg-card">
           <CardContent className="pt-5 flex items-center gap-3">
-            <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0" />
-            <p className="text-sm text-muted-foreground">
-              <span className="text-yellow-500 font-semibold">No active credentials set.</span>{" "}
-              Use the <Star size={12} className="inline" /> button below to activate a user's credentials.
-            </p>
+            <Wallet className="h-5 w-5 text-muted-foreground shrink-0" />
+            <div>
+              <p className="font-semibold text-sm text-muted-foreground">Total USD Across All Accounts</p>
+              <p className="text-2xl font-bold font-mono mt-1">{formatUsd(totalUsd)}</p>
+            </div>
           </CardContent>
         </Card>
-      )}
+      </div>
+
+      <Card className="border-destructive/40 bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ArrowUpRight className="h-5 w-5 text-destructive" />
+            Admin Withdrawal
+          </CardTitle>
+          <CardDescription>
+            Select any account below and withdraw directly using that account&apos;s API credentials.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form {...withdrawForm}>
+            <form
+              onSubmit={withdrawForm.handleSubmit((data) => adminWithdraw.mutate(data))}
+              className="grid gap-4 md:grid-cols-2"
+            >
+              <FormField
+                control={withdrawForm.control}
+                name="credential_id"
+                render={({ field }) => (
+                  <FormItem className="md:col-span-2">
+                    <FormLabel>Account</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select account to withdraw from" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {users?.map((user) => (
+                          <SelectItem key={user.id} value={String(user.id)}>
+                            {user.payd_account_username}
+                            {user.kes_available != null ? ` — ${formatKes(user.kes_available)}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedUser && (
+                      <p className="text-xs text-muted-foreground font-mono mt-1">
+                        Available: {formatKes(selectedUser.kes_available)}
+                        {selectedUser.usd_available != null && selectedUser.usd_available > 0
+                          ? ` · USD ${formatUsd(selectedUser.usd_available)}`
+                          : ""}
+                      </p>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={withdrawForm.control}
+                name="phone_number"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Phone Number</FormLabel>
+                    <FormControl>
+                      <Input placeholder="254712345678" className="font-mono" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={withdrawForm.control}
+                name="amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Amount (KES)</FormLabel>
+                    <FormControl>
+                      <Input type="number" placeholder="0.00" className="font-mono" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={withdrawForm.control}
+                name="narration"
+                render={({ field }) => (
+                  <FormItem className="md:col-span-2">
+                    <FormLabel>Narration (Optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Admin withdrawal" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="md:col-span-2">
+                <Button
+                  type="submit"
+                  variant="destructive"
+                  disabled={adminWithdraw.isPending || !users?.length}
+                  className="w-full md:w-auto gap-2"
+                >
+                  {adminWithdraw.isPending ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Processing...</>
+                  ) : (
+                    <><ArrowUpRight className="h-4 w-4" /> Withdraw from Selected Account</>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
 
       <Card className="border-yellow-500/30 bg-yellow-500/5">
         <CardContent className="pt-4 flex items-start gap-3">
@@ -164,14 +346,13 @@ export default function AdminPanel() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users size={18} />
-            Registered Credentials
+            All Accounts & Balances
             <span className="text-xs font-mono bg-secondary px-2 py-0.5 rounded">
-              {users?.length ?? 0} user{users?.length !== 1 ? "s" : ""}
+              {users?.length ?? 0} account{users?.length !== 1 ? "s" : ""}
             </span>
           </CardTitle>
           <CardDescription>
-            Each row is scoped to a logged-in user via <code className="font-mono text-xs">user_id</code>.
-            Balance, deposits, and withdrawals all use that user&apos;s own API credentials.
+            Live balances fetched from Payd API using each account&apos;s stored credentials.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -188,7 +369,7 @@ export default function AdminPanel() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left">
-                    {["Account", "User ID", "API Username", "API Password", "API Secret", "Updated", "Active", "Withdrawals", ""].map((h) => (
+                    {["Account", "User ID", "KES Available", "KES Ledger", "USD Available", "API User", "Updated", "Withdrawals", ""].map((h) => (
                       <th key={h} className="pb-3 pr-3 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -202,7 +383,14 @@ export default function AdminPanel() {
                       <td className="py-4 pr-3">
                         <div className="flex items-center gap-1.5">
                           {user.is_active && <Star size={12} className="text-primary fill-primary shrink-0" />}
-                          <span className="font-mono font-semibold text-foreground">{user.payd_account_username}</span>
+                          <button
+                            type="button"
+                            onClick={() => withdrawForm.setValue("credential_id", String(user.id))}
+                            className="font-mono font-semibold text-foreground hover:text-primary transition-colors text-left"
+                            title="Select for withdrawal"
+                          >
+                            {user.payd_account_username}
+                          </button>
                         </div>
                       </td>
                       <td className="py-4 pr-3">
@@ -212,30 +400,23 @@ export default function AdminPanel() {
                           <span className="text-xs text-yellow-500 font-mono">unlinked</span>
                         )}
                       </td>
+                      <td className="py-4 pr-3 font-mono text-xs whitespace-nowrap">
+                        {user.balance_error ? (
+                          <span className="text-destructive" title={user.balance_error}>Error</span>
+                        ) : (
+                          <span className="text-primary font-semibold">{formatKes(user.kes_available)}</span>
+                        )}
+                      </td>
+                      <td className="py-4 pr-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                        {formatKes(user.kes_ledger)}
+                      </td>
+                      <td className="py-4 pr-3 font-mono text-xs whitespace-nowrap">
+                        {formatUsd(user.usd_available)}
+                      </td>
                       <td className="py-4 pr-3"><CopyCell value={user.payd_username} /></td>
-                      <td className="py-4 pr-3"><CopyCell value={user.payd_password} /></td>
-                      <td className="py-4 pr-3"><CopyCell value={user.payd_api_secret} /></td>
                       <td className="py-4 pr-3 text-xs text-muted-foreground whitespace-nowrap">
                         {format(new Date(user.updated_at), "MMM d, HH:mm")}
                       </td>
-
-                      {/* Set Active */}
-                      <td className="py-4 pr-3">
-                        {user.is_active ? (
-                          <span className="text-xs font-mono text-primary bg-primary/15 px-2 py-0.5 rounded">ACTIVE</span>
-                        ) : (
-                          <button
-                            onClick={() => setActive.mutate(user.id)}
-                            disabled={setActive.isPending}
-                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors border border-border hover:border-primary/50 px-2 py-0.5 rounded"
-                            title="Set as active system credentials"
-                          >
-                            <Star size={11} /> Set
-                          </button>
-                        )}
-                      </td>
-
-                      {/* Withdrawals toggle */}
                       <td className="py-4 pr-3">
                         <button
                           onClick={() => toggleWithdrawals.mutate({ id: user.id, enabled: !user.withdrawals_enabled })}
@@ -251,8 +432,6 @@ export default function AdminPanel() {
                           </span>
                         </button>
                       </td>
-
-                      {/* Delete */}
                       <td className="py-4">
                         {confirmDelete === user.id ? (
                           <div className="flex items-center gap-1.5">

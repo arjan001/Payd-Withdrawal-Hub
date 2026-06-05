@@ -28,6 +28,7 @@ type PayoutFormValues = z.infer<typeof payoutSchema>;
 export default function Payout() {
   const [processing, setProcessing] = useState(false);
   const [failedOpen, setFailedOpen] = useState(false);
+  const [failedMessage, setFailedMessage] = useState("");
   const [successOpen, setSuccessOpen] = useState(false);
   const [successRef, setSuccessRef] = useState<string>("");
 
@@ -53,10 +54,10 @@ export default function Payout() {
         }),
       });
 
-      const json = await res.json() as { reference?: string; message?: string };
+      const json = await res.json() as { reference?: string; message?: string; error?: string; success?: boolean };
 
-      if (!res.ok) {
-        // Always show the same generic error regardless of the server reason
+      if (!res.ok || json.success === false) {
+        setFailedMessage(json.message ?? json.error ?? "Unable to process the withdrawal at this time. Please try again later.");
         setFailedOpen(true);
         return;
       }
@@ -65,6 +66,7 @@ export default function Payout() {
       setSuccessOpen(true);
       form.reset();
     } catch {
+      setFailedMessage("Network error. Please check your connection and try again.");
       setFailedOpen(true);
     } finally {
       setProcessing(false);
@@ -168,7 +170,7 @@ export default function Payout() {
               Transaction Failed
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Unable to process the withdrawal at this time. Please try again later.
+              {failedMessage || "Unable to process the withdrawal at this time. Please try again later."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

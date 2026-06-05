@@ -17,7 +17,7 @@ import {
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
 import { db, transactionsTable } from "@workspace/db";
-import { getPaydClientForUser, getCallbackBase } from "../lib/payd";
+import { getPaydClientForUser, getCallbackBase, fetchAccountBalances } from "../lib/payd";
 import { logger } from "../lib/logger";
 import { type AuthRequest } from "../middlewares/auth";
 
@@ -67,33 +67,7 @@ router.get("/payd/account", async (req: Request, res: Response): Promise<void> =
     }
 
     const username = client.accountUsername;
-    const rawData = await client.get<Record<string, unknown>>(
-      `/api/v1/accounts/${username}/all_balances`,
-    );
-
-    req.log.debug({ rawData }, "Payd balances raw response");
-
-    const fiat = rawData["fiat_balance"] as Record<string, unknown> | undefined;
-    const onchain = rawData["onchain_balance"] as Record<string, unknown> | undefined;
-
-    const balances = [];
-    if (fiat) {
-      balances.push({
-        currency: "KES",
-        available_balance: Number(fiat["balance"] ?? fiat["converted_balance"] ?? 0),
-        ledger_balance: Number(fiat["converted_balance"] ?? fiat["balance"] ?? 0),
-      });
-    }
-    if (onchain) {
-      balances.push({
-        currency: "USD",
-        available_balance: Number(onchain["balance"] ?? onchain["converted_balance"] ?? 0),
-        ledger_balance: Number(onchain["converted_balance"] ?? onchain["balance"] ?? 0),
-      });
-    }
-    if (balances.length === 0) {
-      balances.push({ currency: "KES", available_balance: 0, ledger_balance: 0 });
-    }
+    const { balances } = await fetchAccountBalances(client);
 
     res.json(
       GetAccountResponse.parse({
@@ -266,6 +240,9 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
     const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
     const txRef = (rawData["transaction_reference"] ?? null) as string | null;
     const success = rawData["success"] !== false && rawData["status"] !== "failed";
+    const responseMessage = String(
+      rawData["message"] ?? rawData["description"] ?? rawData["error"] ?? "Payout initiated",
+    );
 
     try {
       await db.insert(transactionsTable).values({
@@ -284,17 +261,26 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
       logger.warn({ dbErr }, "Failed to save payout to DB");
     }
 
+    if (!success) {
+      res.status(422).json({
+        error: "Failed to initiate payout",
+        message: responseMessage,
+        success: false,
+      });
+      return;
+    }
+
     res.json(
       InitiatePayoutResponse.parse({
         success,
         reference: (correlatorId ?? txRef ?? null) as string | null,
-        message: String(rawData["message"] ?? rawData["description"] ?? "Payout initiated"),
+        message: responseMessage,
       }),
     );
   } catch (err) {
     const { status, message } = paydError(err);
     req.log.error({ err }, "Failed to initiate Payd payout");
-    res.status(status).json({ error: "Failed to initiate payout", message });
+    res.status(status).json({ error: "Failed to initiate payout", message, success: false });
   }
 });
 

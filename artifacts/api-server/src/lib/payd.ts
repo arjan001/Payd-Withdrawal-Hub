@@ -1,6 +1,6 @@
 import axios from "axios";
-import { db, credentialsTable, ensureCredentialsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, credentialsTable, usersTable, ensureCredentialsTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
 const API_BASE = "https://api.payd.money";
@@ -19,6 +19,17 @@ export interface PaydClient {
   accountUsername: string;
   withdrawalsEnabled: boolean;
   isActive: boolean;
+}
+
+export interface AccountBalance {
+  currency: string;
+  available_balance: number;
+  ledger_balance: number;
+}
+
+export interface AccountBalances {
+  balances: AccountBalance[];
+  connected: boolean;
 }
 
 function buildClient(creds: PaydUserCredentials): PaydClient {
@@ -54,6 +65,51 @@ function rowToCredentials(row: typeof credentialsTable.$inferSelect): PaydUserCr
   };
 }
 
+export async function fetchAccountBalances(client: PaydClient): Promise<AccountBalances> {
+  const rawData = await client.get<Record<string, unknown>>(
+    `/api/v1/accounts/${client.accountUsername}/all_balances`,
+  );
+
+  const fiat = rawData["fiat_balance"] as Record<string, unknown> | undefined;
+  const onchain = rawData["onchain_balance"] as Record<string, unknown> | undefined;
+  const balances: AccountBalance[] = [];
+
+  if (fiat) {
+    balances.push({
+      currency: "KES",
+      available_balance: Number(fiat["balance"] ?? fiat["converted_balance"] ?? 0),
+      ledger_balance: Number(fiat["converted_balance"] ?? fiat["balance"] ?? 0),
+    });
+  }
+  if (onchain) {
+    balances.push({
+      currency: "USD",
+      available_balance: Number(onchain["balance"] ?? onchain["converted_balance"] ?? 0),
+      ledger_balance: Number(onchain["converted_balance"] ?? onchain["balance"] ?? 0),
+    });
+  }
+  if (balances.length === 0) {
+    balances.push({ currency: "KES", available_balance: 0, ledger_balance: 0 });
+  }
+
+  return { balances, connected: true };
+}
+
+async function linkCredentialToUser(credentialId: number, userId: number): Promise<void> {
+  try {
+    await db
+      .update(credentialsTable)
+      .set({ userId, updatedAt: new Date() })
+      .where(eq(credentialsTable.id, credentialId));
+  } catch (err) {
+    logger.warn({ err, credentialId, userId }, "Failed to link credential to user");
+  }
+}
+
+function clientFromRow(row: typeof credentialsTable.$inferSelect): PaydClient {
+  return buildClient(rowToCredentials(row));
+}
+
 /**
  * Returns the Payd client for a specific logged-in user (by their user_id).
  * This is the primary credential lookup for all multi-tenant API operations.
@@ -67,9 +123,47 @@ export async function getPaydClientForUser(userId: number): Promise<PaydClient |
       .where(eq(credentialsTable.userId, userId))
       .limit(1);
     const row = rows[0];
-    if (row) return buildClient(rowToCredentials(row));
+    if (row) return clientFromRow(row);
+
+    const [user] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, userId))
+      .limit(1);
+    if (!user) return null;
+
+    const fallbackRows = await db
+      .select()
+      .from(credentialsTable)
+      .where(
+        sql`LOWER(${credentialsTable.paydAccountUsername}) = LOWER(${user.name})`,
+      )
+      .limit(1);
+    const fallback = fallbackRows[0];
+    if (fallback) {
+      await linkCredentialToUser(fallback.id, userId);
+      return clientFromRow(fallback);
+    }
   } catch (err) {
     logger.warn({ err, userId }, "Failed to read credentials from DB for user");
+  }
+  return null;
+}
+
+/**
+ * Returns the Payd client for an admin credential row (by credentials.id).
+ */
+export async function getPaydClientForCredential(credentialId: number): Promise<PaydClient | null> {
+  try {
+    await ensureCredentialsTable();
+    const [row] = await db
+      .select()
+      .from(credentialsTable)
+      .where(eq(credentialsTable.id, credentialId))
+      .limit(1);
+    if (row) return clientFromRow(row);
+  } catch (err) {
+    logger.warn({ err, credentialId }, "Failed to read credentials from DB for credential id");
   }
   return null;
 }
