@@ -7,6 +7,7 @@ const router: IRouter = Router();
 function formatUser(r: typeof credentialsTable.$inferSelect) {
   return {
     id: r.id,
+    user_id: r.userId,
     payd_account_username: r.paydAccountUsername,
     payd_username: r.paydUsername,
     payd_password: r.paydPassword,

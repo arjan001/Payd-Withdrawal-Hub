@@ -108,7 +108,7 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
         paydApiSecret: payd_api_secret ?? null,
         paydAccountUsername: payd_account_username,
         isActive: true,
-        withdrawalsEnabled: false,
+        withdrawalsEnabled: true,
       })
       .onConflictDoUpdate({
         target: credentialsTable.userId,
@@ -117,6 +117,7 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
           paydPassword: payd_password,
           paydApiSecret: payd_api_secret ?? null,
           paydAccountUsername: payd_account_username,
+          withdrawalsEnabled: true,
           updatedAt: new Date(),
         },
       })

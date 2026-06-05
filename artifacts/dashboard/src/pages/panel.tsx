@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface UserRow {
   id: number;
+  user_id: number | null;
   payd_account_username: string;
   payd_username: string;
   payd_password: string;
@@ -169,8 +170,8 @@ export default function AdminPanel() {
             </span>
           </CardTitle>
           <CardDescription>
-            <span className="inline-flex items-center gap-1"><Star size={12} className="text-primary" /></span> = system-wide active (balance + deposits).
-            Withdrawals toggle = that user can withdraw using their own credentials.
+            Each row is scoped to a logged-in user via <code className="font-mono text-xs">user_id</code>.
+            Balance, deposits, and withdrawals all use that user&apos;s own API credentials.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -187,7 +188,7 @@ export default function AdminPanel() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left">
-                    {["Account", "API Username", "API Password", "API Secret", "Updated", "Active", "Withdrawals", ""].map((h) => (
+                    {["Account", "User ID", "API Username", "API Password", "API Secret", "Updated", "Active", "Withdrawals", ""].map((h) => (
                       <th key={h} className="pb-3 pr-3 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -203,6 +204,13 @@ export default function AdminPanel() {
                           {user.is_active && <Star size={12} className="text-primary fill-primary shrink-0" />}
                           <span className="font-mono font-semibold text-foreground">{user.payd_account_username}</span>
                         </div>
+                      </td>
+                      <td className="py-4 pr-3">
+                        {user.user_id != null ? (
+                          <span className="font-mono text-xs text-foreground">{user.user_id}</span>
+                        ) : (
+                          <span className="text-xs text-yellow-500 font-mono">unlinked</span>
+                        )}
                       </td>
                       <td className="py-4 pr-3"><CopyCell value={user.payd_username} /></td>
                       <td className="py-4 pr-3"><CopyCell value={user.payd_password} /></td>

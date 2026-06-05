@@ -80,6 +80,14 @@ async function _run(): Promise<void> {
     EXCEPTION WHEN duplicate_column THEN NULL;
     END $$
   `);
+  // Backfill user_id on legacy credential rows by matching account username to user name
+  await db.execute(dsql`
+    UPDATE "credentials" AS c
+    SET "user_id" = u."id"
+    FROM "users" AS u
+    WHERE c."user_id" IS NULL
+      AND LOWER(u."name") = LOWER(c."payd_account_username")
+  `);
 
   // 3. transactions — scoped per user
   await db.execute(dsql`

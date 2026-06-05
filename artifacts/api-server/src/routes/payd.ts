@@ -239,10 +239,6 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
     });
     return;
   }
-  if (!client.withdrawalsEnabled) {
-    res.status(422).json({ error: "Withdrawals disabled", message: "Unable to process the withdrawal at this time. Please try again later." });
-    return;
-  }
 
   try {
     const parsed = InitiatePayoutBody.safeParse(req.body);
@@ -311,10 +307,6 @@ router.post("/payd/merchant", async (req: Request, res: Response): Promise<void>
       error: "Credentials not configured",
       message: "Please set up your Payd credentials in Settings before initiating a payment.",
     });
-    return;
-  }
-  if (!client.withdrawalsEnabled) {
-    res.status(422).json({ error: "Withdrawals disabled", message: "Unable to process the withdrawal at this time. Please try again later." });
     return;
   }
 
@@ -393,10 +385,6 @@ router.post("/payd/p2p", async (req: Request, res: Response): Promise<void> => {
       error: "Credentials not configured",
       message: "Please set up your Payd credentials in Settings before initiating a transfer.",
     });
-    return;
-  }
-  if (!client.withdrawalsEnabled) {
-    res.status(422).json({ error: "Withdrawals disabled", message: "Unable to process the withdrawal at this time. Please try again later." });
     return;
   }
 
