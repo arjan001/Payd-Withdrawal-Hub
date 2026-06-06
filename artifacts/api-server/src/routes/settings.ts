@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, credentialsTable, ensureCredentialsTable } from "@workspace/db";
+import { db, credentialsTable, ensureCredentialsTable, dropLegacyPaydAccountUsernameConstraint } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { type AuthRequest } from "../middlewares/auth";
 import { resolveCredentialRowForUser } from "../lib/payd";
@@ -91,6 +91,7 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
     }
 
     await ensureCredentialsTable();
+    await dropLegacyPaydAccountUsernameConstraint();
 
     const { payd_username, payd_password, payd_api_secret, payd_account_username } = parsed;
     const credentialPatch = {
@@ -104,21 +105,35 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
       updatedAt: new Date(),
     };
 
-    const [saved] = await db
-      .insert(credentialsTable)
-      .values(credentialPatch)
-      .onConflictDoUpdate({
-        target: credentialsTable.userId,
-        set: {
-          paydUsername: payd_username,
-          paydPassword: payd_password,
-          paydApiSecret: payd_api_secret ?? null,
-          paydAccountUsername: payd_account_username,
-          withdrawalsEnabled: true,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
+    const upsertCredentials = () =>
+      db
+        .insert(credentialsTable)
+        .values(credentialPatch)
+        .onConflictDoUpdate({
+          target: credentialsTable.userId,
+          set: {
+            paydUsername: payd_username,
+            paydPassword: payd_password,
+            paydApiSecret: payd_api_secret ?? null,
+            paydAccountUsername: payd_account_username,
+            withdrawalsEnabled: true,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+    let saved: typeof credentialsTable.$inferSelect | undefined;
+    try {
+      [saved] = await upsertCredentials();
+    } catch (err) {
+      const pgCode = (err as { code?: string }).code;
+      if (pgCode === "23505") {
+        await dropLegacyPaydAccountUsernameConstraint();
+        [saved] = await upsertCredentials();
+      } else {
+        throw err;
+      }
+    }
 
     if (!saved) {
       res.status(500).json({ error: "Failed to save credentials" });

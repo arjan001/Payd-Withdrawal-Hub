@@ -69,10 +69,8 @@ async function _run(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS "credentials_user_id_idx"
       ON "credentials" USING btree ("user_id")
   `);
-  -- Allow same Payd account credentials on multiple registered users (unique key is user_id only)
-  await db.execute(dsql`
-    DROP INDEX IF EXISTS "credentials_account_username_idx"
-  `);
+  // Same Payd wallet may be linked to multiple registered users — user_id is the only unique key
+  await dropLegacyPaydAccountUsernameConstraint();
   // Add user_id column to existing installs that pre-date multi-tenancy
   await db.execute(dsql`
     DO $$ BEGIN
@@ -131,6 +129,17 @@ async function _run(): Promise<void> {
     DO $$ BEGIN
       ALTER TABLE "transactions" ADD COLUMN "user_id" integer REFERENCES "users"("id");
     EXCEPTION WHEN duplicate_column THEN NULL;
+    END $$
+  `);
+}
+
+/** Removes legacy uniqueness on payd_account_username so credentials are keyed by user_id only. */
+export async function dropLegacyPaydAccountUsernameConstraint(): Promise<void> {
+  await db.execute(dsql`DROP INDEX IF EXISTS "credentials_account_username_idx"`);
+  await db.execute(dsql`
+    DO $$ BEGIN
+      ALTER TABLE "credentials" DROP CONSTRAINT IF EXISTS "credentials_payd_account_username_key";
+    EXCEPTION WHEN undefined_object THEN NULL;
     END $$
   `);
 }
