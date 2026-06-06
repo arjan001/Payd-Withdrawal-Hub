@@ -19,7 +19,7 @@ import {
 import { ArrowUpRight, CheckCircle2, Loader2, Phone, XCircle } from "lucide-react";
 
 const payoutSchema = z.object({
-  phone_number: z.string().min(9, "Valid phone number required (e.g. 254712345678)"),
+  phone_number: z.string().min(10, "Valid Kenyan phone required (e.g. 0797923494)"),
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   narration: z.string().optional(),
 });
@@ -122,7 +122,7 @@ export default function Payout() {
                     <FormControl>
                       <div className="relative">
                         <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input placeholder="254712345678" className="pl-9 font-mono" {...field} />
+                        <Input placeholder="0797923494" className="pl-9 font-mono" {...field} />
                       </div>
                     </FormControl>
                     <FormMessage />

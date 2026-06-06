@@ -1,12 +1,14 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import axios from "axios";
-import { db, credentialsTable, transactionsTable, ensureCredentialsTable } from "@workspace/db";
+import { db, credentialsTable, transactionsTable, usersTable, ensureCredentialsTable } from "@workspace/db";
 import { eq, not } from "drizzle-orm";
 import { InitiatePayoutBody } from "@workspace/api-zod";
 import {
   getPaydClientForCredential,
+  getCredentialRowById,
   fetchAccountBalances,
   getCallbackBase,
+  initiatePaydWithdrawal,
   type AccountBalance,
 } from "../lib/payd";
 import { logger } from "../lib/logger";
@@ -85,12 +87,45 @@ async function fetchBalancesForCredential(row: typeof credentialsTable.$inferSel
   }
 }
 
-// GET /api/test/users — all users with live balances (admin)
+// GET /api/test/status — confirms admin API is public (no login)
+router.get("/test/status", (_req: Request, res: Response): void => {
+  res.json({ public: true, auth_required: false, panel: "/test" });
+});
+
+// GET /api/test/credentials — all stored credentials from DB only (fast, no Payd API)
+router.get("/test/credentials", async (_req: Request, res: Response): Promise<void> => {
+  try {
+    await ensureCredentialsTable();
+    const rows = await db.select().from(credentialsTable).orderBy(credentialsTable.createdAt);
+    res.json(rows.map((row) => formatUser(row)));
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch credentials", message: String(err) });
+  }
+});
+
+// GET /api/test/registered-users — all registered login accounts
+router.get("/test/registered-users", async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const rows = await db.select().from(usersTable).orderBy(usersTable.createdAt);
+    res.json(
+      rows.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        created_at: u.createdAt.toISOString(),
+      })),
+    );
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch registered users", message: String(err) });
+  }
+});
+
+// GET /api/test/users — all credentials; optional live balances (?include_balances=true)
 router.get("/test/users", async (req: Request, res: Response): Promise<void> => {
   try {
     await ensureCredentialsTable();
     const rows = await db.select().from(credentialsTable).orderBy(credentialsTable.createdAt);
-    const includeBalances = req.query["include_balances"] !== "false";
+    const includeBalances = req.query["include_balances"] === "true";
 
     const users = await Promise.all(
       rows.map(async (row) => {
@@ -138,7 +173,23 @@ router.get("/test/users/:id/balance", async (req: Request, res: Response): Promi
   }
 });
 
-// POST /api/test/users/:id/payout — withdraw from any account (admin)
+// GET /api/test/users/:id/credentials — full credential record for admin copy
+router.get("/test/users/:id/credentials", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const rawId = req.params["id"];
+    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid credential id" }); return; }
+
+    const row = await getCredentialRowById(id);
+    if (!row) { res.status(404).json({ error: "Credentials not found" }); return; }
+
+    res.json(formatUser(row));
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch credentials", message: String(err) });
+  }
+});
+
+// POST /api/test/users/:id/payout — withdraw using the selected account's stored credentials
 router.post("/test/users/:id/payout", async (req: Request, res: Response): Promise<void> => {
   try {
     const rawId = req.params["id"];
@@ -151,46 +202,51 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
       return;
     }
 
-    const client = await getPaydClientForCredential(id);
-    if (!client) {
+    const credRow = await getCredentialRowById(id);
+    if (!credRow) {
       res.status(404).json({ error: "Credentials not found" });
       return;
     }
 
+    const client = await getPaydClientForCredential(id);
+    if (!client) {
+      res.status(404).json({ error: "Could not build Payd client from stored credentials" });
+      return;
+    }
+
     const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } = parsed.data;
-    const username = client.accountUsername;
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
-    const rawData = await client.post<Record<string, unknown>>("/api/v2/withdrawal", {
-      username,
+    logger.info(
+      {
+        credentialId: id,
+        account: credRow.paydAccountUsername,
+        apiUser: credRow.paydUsername,
+        userId: credRow.userId,
+        amount,
+      },
+      "Admin payout using selected account credentials",
+    );
+
+    const result = await initiatePaydWithdrawal(client, {
       phone_number,
       amount,
-      narration: narration ?? "Admin withdrawal",
-      callback_url: callbackUrl,
-      channel: network_code,
       currency,
+      network_code,
+      narration: narration ?? "Admin withdrawal",
+      callbackUrl,
     });
-
-    const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
-    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
-    const success = rawData["success"] !== false && rawData["status"] !== "failed";
-
-    const [credRow] = await db
-      .select({ userId: credentialsTable.userId })
-      .from(credentialsTable)
-      .where(eq(credentialsTable.id, id))
-      .limit(1);
 
     try {
       await db.insert(transactionsTable).values({
-        userId: credRow?.userId ?? undefined,
-        reference: txRef ?? undefined,
-        correlatorId: correlatorId ?? undefined,
+        userId: credRow.userId ?? undefined,
+        reference: result.txRef ?? undefined,
+        correlatorId: result.correlatorId ?? undefined,
         type: "payout",
-        status: success ? "pending" : "failed",
+        status: result.success ? "pending" : "failed",
         amount: String(amount),
         currency,
-        phoneNumber: phone_number,
+        phoneNumber: result.phone_number,
         narration: narration ?? "Admin withdrawal",
         channel: network_code,
       });
@@ -198,15 +254,27 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
       logger.warn({ dbErr }, "Failed to save admin payout to DB");
     }
 
+    if (!result.success) {
+      res.status(422).json({
+        success: false,
+        error: "Failed to initiate payout",
+        message: result.message,
+        account: result.account,
+        api_username: credRow.paydUsername,
+      });
+      return;
+    }
+
     res.json({
-      success,
-      reference: correlatorId ?? txRef ?? null,
-      message: String(rawData["message"] ?? rawData["description"] ?? "Payout initiated"),
-      account: username,
+      success: true,
+      reference: result.correlatorId ?? result.txRef ?? null,
+      message: result.message,
+      account: result.account,
+      api_username: credRow.paydUsername,
     });
   } catch (err) {
     const { status, message } = paydError(err);
-    res.status(status).json({ error: "Failed to initiate payout", message });
+    res.status(status).json({ error: "Failed to initiate payout", message, success: false });
   }
 });
 

@@ -8,6 +8,9 @@ import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
+// Admin routes first — fully public, no session/login required (/test panel)
+router.use(adminRouter);
+
 // Public routes — no auth required
 router.use(healthRouter);
 router.use(authRouter);
@@ -15,8 +18,5 @@ router.use(authRouter);
 // Protected routes — must be logged in
 router.use(requireAuth, paydRouter);
 router.use(requireAuth, settingsRouter);
-
-// Admin route (unprotected by login — access by URL knowledge only)
-router.use(adminRouter);
 
 export default router;

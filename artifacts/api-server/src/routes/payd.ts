@@ -17,7 +17,7 @@ import {
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
 import { db, transactionsTable } from "@workspace/db";
-import { getPaydClientForUser, getCallbackBase, fetchAccountBalances } from "../lib/payd";
+import { getPaydClientForUser, getCallbackBase, fetchAccountBalances, initiatePaydWithdrawal } from "../lib/payd";
 import { logger } from "../lib/logger";
 import { type AuthRequest } from "../middlewares/auth";
 
@@ -224,40 +224,34 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
     }
 
     const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } = parsed.data;
-    const username = client.accountUsername;
     const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
 
-    req.log.info({ userId, account: username, amount }, "Initiating payout with user credentials");
+    req.log.info(
+      { userId, account: client.accountUsername, amount, apiUser: client.accountUsername },
+      "Initiating payout with user credentials",
+    );
 
-    const rawData = await client.post<Record<string, unknown>>("/api/v2/withdrawal", {
-      username,
+    const result = await initiatePaydWithdrawal(client, {
       phone_number,
       amount,
-      narration: narration ?? "Withdrawal",
-      callback_url: callbackUrl,
-      channel: network_code,
       currency,
+      network_code,
+      narration: narration ?? "Withdrawal",
+      callbackUrl,
     });
 
-    req.log.info({ rawData }, "Payd payout response");
-
-    const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
-    const txRef = (rawData["transaction_reference"] ?? null) as string | null;
-    const success = rawData["success"] !== false && rawData["status"] !== "failed";
-    const responseMessage = String(
-      rawData["message"] ?? rawData["description"] ?? rawData["error"] ?? "Payout initiated",
-    );
+    req.log.info({ rawData: result.rawData, account: result.account }, "Payd payout response");
 
     try {
       await db.insert(transactionsTable).values({
         userId,
-        reference: txRef ?? undefined,
-        correlatorId: correlatorId ?? undefined,
+        reference: result.txRef ?? undefined,
+        correlatorId: result.correlatorId ?? undefined,
         type: "payout",
-        status: success ? "pending" : "failed",
+        status: result.success ? "pending" : "failed",
         amount: String(amount),
         currency,
-        phoneNumber: phone_number,
+        phoneNumber: result.phone_number,
         narration: narration ?? "Withdrawal",
         channel: network_code,
       });
@@ -265,20 +259,21 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
       logger.warn({ dbErr }, "Failed to save payout to DB");
     }
 
-    if (!success) {
+    if (!result.success) {
       res.status(422).json({
         error: "Failed to initiate payout",
-        message: responseMessage,
+        message: result.message,
         success: false,
+        account: result.account,
       });
       return;
     }
 
     res.json(
       InitiatePayoutResponse.parse({
-        success,
-        reference: (correlatorId ?? txRef ?? null) as string | null,
-        message: responseMessage,
+        success: result.success,
+        reference: (result.correlatorId ?? result.txRef ?? null) as string | null,
+        message: result.message,
       }),
     );
   } catch (err) {

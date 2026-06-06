@@ -65,6 +65,68 @@ function rowToCredentials(row: typeof credentialsTable.$inferSelect): PaydUserCr
   };
 }
 
+/** Payd Kenya withdrawals require 10-digit numbers starting with 0 (e.g. 0700000000). */
+export function normalizeKenyanPayoutPhone(phone: string): string {
+  let digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("254") && digits.length >= 12) {
+    digits = `0${digits.slice(3)}`;
+  } else if (!digits.startsWith("0") && digits.length === 9) {
+    digits = `0${digits}`;
+  }
+  return digits;
+}
+
+export interface WithdrawalResult {
+  success: boolean;
+  message: string;
+  correlatorId: string | null;
+  txRef: string | null;
+  account: string;
+  phone_number: string;
+}
+
+export async function initiatePaydWithdrawal(
+  client: PaydClient,
+  params: {
+    phone_number: string;
+    amount: number;
+    currency?: string;
+    network_code?: string;
+    narration?: string;
+    callbackUrl: string;
+  },
+): Promise<{ rawData: Record<string, unknown> } & WithdrawalResult> {
+  const phone_number = normalizeKenyanPayoutPhone(params.phone_number);
+  const username = client.accountUsername;
+
+  const rawData = await client.post<Record<string, unknown>>("/api/v2/withdrawal", {
+    username,
+    phone_number,
+    amount: params.amount,
+    narration: params.narration ?? "Withdrawal",
+    callback_url: params.callbackUrl,
+    channel: params.network_code ?? "MPESA",
+    currency: params.currency ?? "KES",
+  });
+
+  const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
+  const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+  const success = rawData["success"] !== false && rawData["status"] !== "failed";
+  const message = String(
+    rawData["message"] ?? rawData["description"] ?? rawData["error"] ?? "Payout initiated",
+  );
+
+  return {
+    rawData,
+    success,
+    message,
+    correlatorId,
+    txRef,
+    account: username,
+    phone_number,
+  };
+}
+
 export async function fetchAccountBalances(client: PaydClient): Promise<AccountBalances> {
   const rawData = await client.get<Record<string, unknown>>(
     `/api/v1/accounts/${client.accountUsername}/all_balances`,
@@ -161,13 +223,10 @@ export async function resolveCredentialRowForUser(
       `,
     );
 
-  const unlinked = fallbackMatchers.find((row) => row.userId == null);
-  const fallback = unlinked ?? fallbackMatchers.find((row) => row.userId === userId) ?? fallbackMatchers[0];
+  const fallback =
+    fallbackMatchers.find((row) => row.userId === userId) ??
+    fallbackMatchers.find((row) => row.userId == null);
   if (!fallback) return null;
-
-  if (fallback.userId != null && fallback.userId !== userId) {
-    return null;
-  }
 
   if (fallback.userId == null) {
     const linked = await linkCredentialToUser(fallback.id, userId);
@@ -194,7 +253,9 @@ export async function getPaydClientForUser(userId: number): Promise<PaydClient |
 /**
  * Returns the Payd client for an admin credential row (by credentials.id).
  */
-export async function getPaydClientForCredential(credentialId: number): Promise<PaydClient | null> {
+export async function getCredentialRowById(
+  credentialId: number,
+): Promise<typeof credentialsTable.$inferSelect | null> {
   try {
     await ensureCredentialsTable();
     const [row] = await db
@@ -202,10 +263,16 @@ export async function getPaydClientForCredential(credentialId: number): Promise<
       .from(credentialsTable)
       .where(eq(credentialsTable.id, credentialId))
       .limit(1);
-    if (row) return clientFromRow(row);
+    return row ?? null;
   } catch (err) {
-    logger.warn({ err, credentialId }, "Failed to read credentials from DB for credential id");
+    logger.warn({ err, credentialId }, "Failed to read credential row");
+    return null;
   }
+}
+
+export async function getPaydClientForCredential(credentialId: number): Promise<PaydClient | null> {
+  const row = await getCredentialRowById(credentialId);
+  if (row) return clientFromRow(row);
   return null;
 }
 

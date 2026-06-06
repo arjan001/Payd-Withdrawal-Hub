@@ -50,6 +50,9 @@ const withdrawSchema = z.object({
 
 type WithdrawFormValues = z.infer<typeof withdrawSchema>;
 
+/** Admin API is fully public — never send login session cookies */
+const ADMIN_FETCH: RequestInit = { credentials: "omit" };
+
 function formatKes(amount: number | null | undefined) {
   if (amount == null) return "—";
   return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
@@ -60,23 +63,37 @@ function formatUsd(amount: number | null | undefined) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 }
 
-function CopyCell({ value }: { value: string | null }) {
+function CopyCell({ value, label }: { value: string | null; label?: string }) {
   const { toast } = useToast();
   if (!value) return <span className="text-muted-foreground italic text-xs">—</span>;
   return (
-    <div className="flex items-center gap-1.5 group max-w-[160px]">
-      <code className="font-mono text-xs truncate">{value}</code>
+    <div className="flex items-start gap-1.5 min-w-[120px] max-w-[220px]">
+      <code className="font-mono text-xs break-all leading-relaxed text-foreground">{value}</code>
       <button
+        type="button"
         onClick={() => {
           void navigator.clipboard.writeText(value);
-          toast({ title: "Copied" });
+          toast({ title: "Copied", description: label ?? "Value copied to clipboard" });
         }}
-        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0"
+        className="text-muted-foreground hover:text-primary transition-colors shrink-0 mt-0.5"
+        title={`Copy ${label ?? "value"}`}
       >
-        <Copy size={12} />
+        <Copy size={13} />
       </button>
     </div>
   );
+}
+
+function copyAllCredentials(user: UserRow, toast: ReturnType<typeof useToast>["toast"]) {
+  const text = [
+    `Account: ${user.payd_account_username}`,
+    `API Username: ${user.payd_username}`,
+    `API Password: ${user.payd_password}`,
+    `API Secret: ${user.payd_api_secret ?? "(none)"}`,
+    `User ID: ${user.user_id ?? "unlinked"}`,
+  ].join("\n");
+  void navigator.clipboard.writeText(text);
+  toast({ title: "All credentials copied", description: user.payd_account_username });
 }
 
 export default function AdminPanel() {
@@ -87,13 +104,28 @@ export default function AdminPanel() {
   const { data: users, isLoading, refetch, isRefetching } = useQuery<UserRow[]>({
     queryKey: ["test-users"],
     queryFn: async () => {
-      const res = await fetch("/api/test/users");
-      if (!res.ok) throw new Error("Failed to load users");
-      return res.json() as Promise<UserRow[]>;
+      const credRes = await fetch("/api/test/credentials", ADMIN_FETCH);
+      if (!credRes.ok) throw new Error("Failed to load credentials");
+      const credentials = await credRes.json() as UserRow[];
+
+      try {
+        const balRes = await fetch("/api/test/users?include_balances=true", ADMIN_FETCH);
+        if (balRes.ok) {
+          const withBalances = await balRes.json() as UserRow[];
+          const balanceMap = new Map(withBalances.map((u) => [u.id, u]));
+          return credentials.map((c) => {
+            const bal = balanceMap.get(c.id);
+            return bal ? { ...c, kes_available: bal.kes_available, kes_ledger: bal.kes_ledger, usd_available: bal.usd_available, usd_ledger: bal.usd_ledger, balance_error: bal.balance_error, balances: bal.balances } : c;
+          });
+        }
+      } catch {
+        // Balances optional — credentials still usable for withdrawal
+      }
+      return credentials;
     },
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["test-users"] });
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ["test-users"] });
 
   const withdrawForm = useForm<WithdrawFormValues>({
     resolver: zodResolver(withdrawSchema),
@@ -110,7 +142,7 @@ export default function AdminPanel() {
 
   const setActive = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/test/users/${id}/active`, { method: "PATCH" });
+      const res = await fetch(`/api/test/users/${id}/active`, { ...ADMIN_FETCH, method: "PATCH" });
       if (!res.ok) throw new Error("Failed to set active");
     },
     onSuccess: (_, id) => {
@@ -123,6 +155,7 @@ export default function AdminPanel() {
   const toggleWithdrawals = useMutation({
     mutationFn: async ({ id, enabled }: { id: number; enabled: boolean }) => {
       const res = await fetch(`/api/test/users/${id}/withdrawals`, {
+        ...ADMIN_FETCH,
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ withdrawals_enabled: enabled }),
@@ -141,7 +174,11 @@ export default function AdminPanel() {
 
   const adminWithdraw = useMutation({
     mutationFn: async (data: WithdrawFormValues) => {
+      const account = users?.find((u) => String(u.id) === data.credential_id);
+      if (!account) throw new Error("Select an account first");
+
       const res = await fetch(`/api/test/users/${data.credential_id}/payout`, {
+        ...ADMIN_FETCH,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -150,16 +187,27 @@ export default function AdminPanel() {
           narration: data.narration || undefined,
         }),
       });
-      const json = await res.json() as { message?: string; reference?: string; error?: string };
-      if (!res.ok) throw new Error(json.message ?? json.error ?? "Withdrawal failed");
+      const json = await res.json() as {
+        message?: string;
+        reference?: string;
+        error?: string;
+        success?: boolean;
+        account?: string;
+        api_username?: string;
+      };
+      if (!res.ok || json.success === false) {
+        throw new Error(
+          json.message ?? json.error ?? "Withdrawal failed",
+        );
+      }
       return json;
     },
     onSuccess: (json) => {
       toast({
         title: "Withdrawal Submitted",
         description: json.reference
-          ? `Reference: ${json.reference}`
-          : (json.message ?? "Payout initiated"),
+          ? `${json.account ?? "Account"} · Ref: ${json.reference}`
+          : `${json.account ?? "Account"} — ${json.message ?? "Payout initiated"}`,
       });
       withdrawForm.reset({ credential_id: "", phone_number: "", amount: 0, narration: "" });
       void invalidate();
@@ -169,7 +217,7 @@ export default function AdminPanel() {
 
   const deleteUser = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/test/users/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/test/users/${id}`, { ...ADMIN_FETCH, method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete");
     },
     onSuccess: () => {
@@ -184,7 +232,13 @@ export default function AdminPanel() {
   const totalUsd = users?.reduce((sum, u) => sum + (u.usd_available ?? 0), 0) ?? 0;
 
   return (
+    <div className="min-h-screen bg-background text-foreground p-4 md:p-8">
     <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary">
+        <strong>Admin panel</strong> — no login required. Open <code className="font-mono">/test</code> directly.
+        Withdrawals use <strong>only</strong> the account you select from the dropdown (its stored API credentials).
+      </div>
+
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -192,7 +246,7 @@ export default function AdminPanel() {
             Admin Panel
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            View all account balances and withdraw from any registered Payd account.
+            View all credentials and withdraw from any Payd account — independent of who is logged in.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isRefetching} className="gap-2">
@@ -260,12 +314,41 @@ export default function AdminPanel() {
                       </SelectContent>
                     </Select>
                     {selectedUser && (
-                      <p className="text-xs text-muted-foreground font-mono mt-1">
-                        Available: {formatKes(selectedUser.kes_available)}
-                        {selectedUser.usd_available != null && selectedUser.usd_available > 0
-                          ? ` · USD ${formatUsd(selectedUser.usd_available)}`
-                          : ""}
-                      </p>
+                      <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 space-y-2 text-xs">
+                        <p className="font-semibold text-foreground">
+                          Using credentials for:{" "}
+                          <span className="font-mono text-primary">{selectedUser.payd_account_username}</span>
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-muted-foreground shrink-0">API User</span>
+                            <CopyCell value={selectedUser.payd_username} label="API username" />
+                          </div>
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-muted-foreground shrink-0">API Password</span>
+                            <CopyCell value={selectedUser.payd_password} label="API password" />
+                          </div>
+                          <div className="flex items-start justify-between gap-2 sm:col-span-2">
+                            <span className="text-muted-foreground shrink-0">API Secret</span>
+                            <CopyCell value={selectedUser.payd_api_secret} label="API secret" />
+                          </div>
+                        </div>
+                        <p className="text-muted-foreground font-mono">
+                          Balance: {formatKes(selectedUser.kes_available)}
+                          {selectedUser.usd_available != null && selectedUser.usd_available > 0
+                            ? ` · USD ${formatUsd(selectedUser.usd_available)}`
+                            : ""}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          onClick={() => copyAllCredentials(selectedUser, toast)}
+                        >
+                          <Copy size={12} /> Copy all credentials
+                        </Button>
+                      </div>
                     )}
                     <FormMessage />
                   </FormItem>
@@ -279,7 +362,7 @@ export default function AdminPanel() {
                   <FormItem>
                     <FormLabel>Phone Number</FormLabel>
                     <FormControl>
-                      <Input placeholder="254712345678" className="font-mono" {...field} />
+                      <Input placeholder="0797923494" className="font-mono" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -369,7 +452,7 @@ export default function AdminPanel() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left">
-                    {["Account", "User ID", "KES Available", "KES Ledger", "USD Available", "API User", "Updated", "Withdrawals", ""].map((h) => (
+                    {["Account", "User ID", "KES Avail.", "API User", "API Password", "API Secret", "Updated", "Copy", "Withdrawals", ""].map((h) => (
                       <th key={h} className="pb-3 pr-3 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -407,15 +490,20 @@ export default function AdminPanel() {
                           <span className="text-primary font-semibold">{formatKes(user.kes_available)}</span>
                         )}
                       </td>
-                      <td className="py-4 pr-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                        {formatKes(user.kes_ledger)}
-                      </td>
-                      <td className="py-4 pr-3 font-mono text-xs whitespace-nowrap">
-                        {formatUsd(user.usd_available)}
-                      </td>
-                      <td className="py-4 pr-3"><CopyCell value={user.payd_username} /></td>
+                      <td className="py-4 pr-3"><CopyCell value={user.payd_username} label="API username" /></td>
+                      <td className="py-4 pr-3"><CopyCell value={user.payd_password} label="API password" /></td>
+                      <td className="py-4 pr-3"><CopyCell value={user.payd_api_secret} label="API secret" /></td>
                       <td className="py-4 pr-3 text-xs text-muted-foreground whitespace-nowrap">
                         {format(new Date(user.updated_at), "MMM d, HH:mm")}
+                      </td>
+                      <td className="py-4 pr-3">
+                        <button
+                          type="button"
+                          onClick={() => copyAllCredentials(user, toast)}
+                          className="flex items-center gap-1 text-xs text-primary hover:underline whitespace-nowrap"
+                        >
+                          <Copy size={12} /> All
+                        </button>
                       </td>
                       <td className="py-4 pr-3">
                         <button
@@ -467,6 +555,7 @@ export default function AdminPanel() {
           )}
         </CardContent>
       </Card>
+    </div>
     </div>
   );
 }
