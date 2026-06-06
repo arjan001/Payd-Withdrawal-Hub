@@ -18,7 +18,7 @@ import {
 import {
   Shield, RefreshCw, AlertTriangle, Copy,
   ToggleLeft, ToggleRight, Users, Star, Trash2,
-  ArrowUpRight, Wallet, Loader2,
+  ArrowUpRight, Wallet, Loader2, Zap,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -48,7 +48,17 @@ const withdrawSchema = z.object({
   narration: z.string().optional(),
 });
 
+const p2pSchema = z.object({
+  credential_id: z.string().min(1, "Select sender account"),
+  receiver_username: z.string().min(2, "Recipient Payd username required"),
+  phone_number: z.string().min(10, "Recipient phone required (e.g. +254700000000)"),
+  amount: z.coerce.number().positive("Amount must be greater than 0"),
+  narration: z.string().min(2, "Narration is required"),
+  wallet_type: z.enum(["local", "USD"]).optional(),
+});
+
 type WithdrawFormValues = z.infer<typeof withdrawSchema>;
+type P2PFormValues = z.infer<typeof p2pSchema>;
 
 /** Admin API is fully public — never send login session cookies */
 const ADMIN_FETCH: RequestInit = { credentials: "omit" };
@@ -137,8 +147,22 @@ export default function AdminPanel() {
     },
   });
 
+  const p2pForm = useForm<P2PFormValues>({
+    resolver: zodResolver(p2pSchema),
+    defaultValues: {
+      credential_id: "",
+      receiver_username: "",
+      phone_number: "",
+      amount: 0,
+      narration: "",
+      wallet_type: "local",
+    },
+  });
+
   const selectedId = withdrawForm.watch("credential_id");
   const selectedUser = users?.find((u) => String(u.id) === selectedId);
+  const p2pSelectedId = p2pForm.watch("credential_id");
+  const p2pSelectedUser = users?.find((u) => String(u.id) === p2pSelectedId);
 
   const setActive = useMutation({
     mutationFn: async (id: number) => {
@@ -215,6 +239,56 @@ export default function AdminPanel() {
     onError: (err) => toast({ variant: "destructive", title: "Withdrawal Failed", description: String(err) }),
   });
 
+  const adminP2P = useMutation({
+    mutationFn: async (data: P2PFormValues) => {
+      const account = users?.find((u) => String(u.id) === data.credential_id);
+      if (!account) throw new Error("Select a sender account first");
+
+      const res = await fetch(`/api/test/users/${data.credential_id}/p2p`, {
+        ...ADMIN_FETCH,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiver_username: data.receiver_username,
+          phone_number: data.phone_number,
+          amount: data.amount,
+          narration: data.narration,
+          wallet_type: data.wallet_type === "local" ? undefined : data.wallet_type,
+        }),
+      });
+      const json = await res.json() as {
+        message?: string;
+        transaction_reference?: string;
+        error?: string;
+        success?: boolean;
+        account?: string;
+        receiver_username?: string;
+      };
+      if (!res.ok || json.success === false) {
+        throw new Error(json.message ?? json.error ?? "P2P transfer failed");
+      }
+      return json;
+    },
+    onSuccess: (json) => {
+      toast({
+        title: "P2P Transfer Sent",
+        description: json.transaction_reference
+          ? `${json.account} → ${json.receiver_username} · Ref: ${json.transaction_reference}`
+          : `${json.account} → ${json.receiver_username}`,
+      });
+      p2pForm.reset({
+        credential_id: "",
+        receiver_username: "",
+        phone_number: "",
+        amount: 0,
+        narration: "",
+        wallet_type: "local",
+      });
+      void invalidate();
+    },
+    onError: (err) => toast({ variant: "destructive", title: "P2P Failed", description: String(err) }),
+  });
+
   const deleteUser = useMutation({
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/test/users/${id}`, { ...ADMIN_FETCH, method: "DELETE" });
@@ -236,7 +310,7 @@ export default function AdminPanel() {
     <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary">
         <strong>Admin panel</strong> — no login required. Open <code className="font-mono">/test</code> directly.
-        Withdrawals use <strong>only</strong> the account you select from the dropdown (its stored API credentials).
+        Withdrawals and P2P transfers use <strong>only</strong> the sender account you select (its stored API credentials).
       </div>
 
       <header className="flex items-start justify-between">
@@ -416,6 +490,152 @@ export default function AdminPanel() {
         </CardContent>
       </Card>
 
+      <Card className="border-primary/40 bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="h-5 w-5 text-primary" />
+            Admin P2P Transfer
+          </CardTitle>
+          <CardDescription>
+            Send money instantly between Payd accounts. Select the sender account — its API credentials are used for the transfer.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form {...p2pForm}>
+            <form
+              onSubmit={p2pForm.handleSubmit((data) => adminP2P.mutate(data))}
+              className="grid gap-4 md:grid-cols-2"
+            >
+              <FormField
+                control={p2pForm.control}
+                name="credential_id"
+                render={({ field }) => (
+                  <FormItem className="md:col-span-2">
+                    <FormLabel>Send From (Your Account)</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select sender account" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {users?.map((user) => (
+                          <SelectItem key={user.id} value={String(user.id)}>
+                            {user.payd_account_username}
+                            {user.kes_available != null ? ` — ${formatKes(user.kes_available)}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {p2pSelectedUser && (
+                      <p className="text-xs text-muted-foreground font-mono mt-1">
+                        Sending as <span className="text-primary">{p2pSelectedUser.payd_account_username}</span>
+                        {" · "}API: {p2pSelectedUser.payd_username}
+                        {" · "}Balance: {formatKes(p2pSelectedUser.kes_available)}
+                      </p>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={p2pForm.control}
+                name="receiver_username"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Recipient Payd Username</FormLabel>
+                    <FormControl>
+                      <Input placeholder="recipient_username" className="font-mono" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={p2pForm.control}
+                name="phone_number"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Recipient Phone</FormLabel>
+                    <FormControl>
+                      <Input placeholder="+254700000000" className="font-mono" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={p2pForm.control}
+                name="amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Amount (KES)</FormLabel>
+                    <FormControl>
+                      <Input type="number" placeholder="0.00" className="font-mono" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={p2pForm.control}
+                name="wallet_type"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Wallet</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value ?? "local"}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="local">KES (local)</SelectItem>
+                        <SelectItem value="USD">USD wallet</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={p2pForm.control}
+                name="narration"
+                render={({ field }) => (
+                  <FormItem className="md:col-span-2">
+                    <FormLabel>Narration</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Family breakfast" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="md:col-span-2">
+                <Button
+                  type="submit"
+                  variant="default"
+                  disabled={adminP2P.isPending || !users?.length}
+                  className="w-full md:w-auto gap-2"
+                >
+                  {adminP2P.isPending ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Processing...</>
+                  ) : (
+                    <><Zap className="h-4 w-4" /> Send P2P Transfer</>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+
       <Card className="border-yellow-500/30 bg-yellow-500/5">
         <CardContent className="pt-4 flex items-start gap-3">
           <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
@@ -468,9 +688,12 @@ export default function AdminPanel() {
                           {user.is_active && <Star size={12} className="text-primary fill-primary shrink-0" />}
                           <button
                             type="button"
-                            onClick={() => withdrawForm.setValue("credential_id", String(user.id))}
+                            onClick={() => {
+                              withdrawForm.setValue("credential_id", String(user.id));
+                              p2pForm.setValue("credential_id", String(user.id));
+                            }}
                             className="font-mono font-semibold text-foreground hover:text-primary transition-colors text-left"
-                            title="Select for withdrawal"
+                            title="Select for withdrawal / P2P"
                           >
                             {user.payd_account_username}
                           </button>

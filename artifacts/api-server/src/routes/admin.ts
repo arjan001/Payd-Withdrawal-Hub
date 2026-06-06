@@ -2,13 +2,14 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import axios from "axios";
 import { db, credentialsTable, transactionsTable, usersTable, ensureCredentialsTable } from "@workspace/db";
 import { eq, not } from "drizzle-orm";
-import { InitiatePayoutBody } from "@workspace/api-zod";
+import { InitiatePayoutBody, InitiateP2PTransferBody } from "@workspace/api-zod";
 import {
   getPaydClientForCredential,
   getCredentialRowById,
   fetchAccountBalances,
   getCallbackBase,
   initiatePaydWithdrawal,
+  initiatePaydP2P,
   type AccountBalance,
 } from "../lib/payd";
 import { logger } from "../lib/logger";
@@ -275,6 +276,96 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
   } catch (err) {
     const { status, message } = paydError(err);
     res.status(status).json({ error: "Failed to initiate payout", message, success: false });
+  }
+});
+
+// POST /api/test/users/:id/p2p — Payd-to-Payd transfer from selected account
+router.post("/test/users/:id/p2p", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const rawId = req.params["id"];
+    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid credential id" }); return; }
+
+    const parsed = InitiateP2PTransferBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const credRow = await getCredentialRowById(id);
+    if (!credRow) {
+      res.status(404).json({ error: "Credentials not found" });
+      return;
+    }
+
+    const client = await getPaydClientForCredential(id);
+    if (!client) {
+      res.status(404).json({ error: "Could not build Payd client from stored credentials" });
+      return;
+    }
+
+    const { receiver_username, amount, narration, phone_number, wallet_type } = parsed.data;
+
+    logger.info(
+      {
+        credentialId: id,
+        sender: credRow.paydAccountUsername,
+        receiver: receiver_username,
+        apiUser: credRow.paydUsername,
+        amount,
+      },
+      "Admin P2P using selected account credentials",
+    );
+
+    const result = await initiatePaydP2P(client, {
+      receiver_username,
+      amount,
+      narration,
+      phone_number,
+      wallet_type,
+    });
+
+    try {
+      await db.insert(transactionsTable).values({
+        userId: credRow.userId ?? undefined,
+        reference: result.transaction_reference ?? undefined,
+        type: "p2p",
+        status: result.success ? "success" : "failed",
+        amount: String(amount),
+        currency: "KES",
+        phoneNumber: result.phone_number,
+        narration,
+        channel: "payd",
+        receiverUsername: receiver_username,
+        walletType: wallet_type ?? null,
+      });
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "Failed to save admin P2P to DB");
+    }
+
+    if (!result.success) {
+      res.status(422).json({
+        success: false,
+        error: "Failed to initiate P2P transfer",
+        message: result.message,
+        account: result.account,
+        receiver_username: result.receiver_username,
+        api_username: credRow.paydUsername,
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      transaction_reference: result.transaction_reference,
+      message: result.message,
+      account: result.account,
+      receiver_username: result.receiver_username,
+      api_username: credRow.paydUsername,
+    });
+  } catch (err) {
+    const { status, message } = paydError(err);
+    res.status(status).json({ error: "Failed to initiate P2P transfer", message, success: false });
   }
 });
 

@@ -85,6 +85,61 @@ export interface WithdrawalResult {
   phone_number: string;
 }
 
+/** Payd P2P transfers require recipient phone with country code (e.g. +254700000000). */
+export function normalizeP2PPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("254")) return `+${digits}`;
+  if (digits.startsWith("0") && digits.length === 10) return `+254${digits.slice(1)}`;
+  if (digits.length === 9) return `+254${digits}`;
+  return phone.startsWith("+") ? phone : `+${digits}`;
+}
+
+export interface P2PResult {
+  success: boolean;
+  message: string;
+  transaction_reference: string | null;
+  account: string;
+  receiver_username: string;
+  phone_number: string;
+}
+
+export async function initiatePaydP2P(
+  client: PaydClient,
+  params: {
+    receiver_username: string;
+    amount: number;
+    narration: string;
+    phone_number: string;
+    wallet_type?: string | null;
+  },
+): Promise<{ rawData: Record<string, unknown> } & P2PResult> {
+  const phone_number = normalizeP2PPhone(params.phone_number);
+
+  const rawData = await client.post<Record<string, unknown>>("/api/v2/p2p", {
+    receiver_username: params.receiver_username,
+    amount: params.amount,
+    narration: params.narration,
+    phone_number,
+    ...(params.wallet_type ? { wallet_type: params.wallet_type } : {}),
+  });
+
+  const txRef = (rawData["transaction_reference"] ?? null) as string | null;
+  const success = rawData["success"] !== false;
+  const message = String(
+    rawData["message"] ?? rawData["description"] ?? rawData["error"] ?? "Transfer completed",
+  );
+
+  return {
+    rawData,
+    success,
+    message,
+    transaction_reference: txRef,
+    account: client.accountUsername,
+    receiver_username: params.receiver_username,
+    phone_number,
+  };
+}
+
 export async function initiatePaydWithdrawal(
   client: PaydClient,
   params: {
