@@ -1,6 +1,6 @@
 import axios from "axios";
-import { db, credentialsTable, usersTable, ensureCredentialsTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { db, credentialsTable, ensureCredentialsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { logger } from "./logger";
 
 const API_BASE = "https://api.payd.money";
@@ -212,29 +212,6 @@ export async function fetchAccountBalances(client: PaydClient): Promise<AccountB
   return { balances, connected: true };
 }
 
-async function linkCredentialToUser(
-  credentialId: number,
-  userId: number,
-  patch?: Partial<typeof credentialsTable.$inferInsert>,
-): Promise<typeof credentialsTable.$inferSelect | null> {
-  try {
-    const [updated] = await db
-      .update(credentialsTable)
-      .set({
-        userId,
-        withdrawalsEnabled: true,
-        updatedAt: new Date(),
-        ...patch,
-      })
-      .where(eq(credentialsTable.id, credentialId))
-      .returning();
-    return updated ?? null;
-  } catch (err) {
-    logger.warn({ err, credentialId, userId }, "Failed to link credential to user");
-    return null;
-  }
-}
-
 function clientFromRow(row: typeof credentialsTable.$inferSelect): PaydClient {
   const creds = rowToCredentials(row);
   creds.withdrawalsEnabled = true;
@@ -242,53 +219,38 @@ function clientFromRow(row: typeof credentialsTable.$inferSelect): PaydClient {
 }
 
 /**
- * Resolves the credential row for a logged-in user.
- * Tries user_id first, then name/email matches, and auto-links orphans.
+ * Resolves credentials strictly by registered user_id (primary key for multi-tenancy).
  */
 export async function resolveCredentialRowForUser(
   userId: number,
 ): Promise<typeof credentialsTable.$inferSelect | null> {
-  await ensureCredentialsTable();
+  return getCredentialRowByUserId(userId);
+}
 
-  const [byUserId] = await db
-    .select()
-    .from(credentialsTable)
-    .where(eq(credentialsTable.userId, userId))
-    .limit(1);
-  if (byUserId) return byUserId;
-
-  const [user] = await db
-    .select()
-    .from(usersTable)
-    .where(eq(usersTable.id, userId))
-    .limit(1);
-  if (!user) return null;
-
-  const emailLocal = user.email.split("@")[0] ?? "";
-
-  const fallbackMatchers = await db
-    .select()
-    .from(credentialsTable)
-    .where(
-      sql`
-        LOWER(${credentialsTable.paydAccountUsername}) = LOWER(${user.name})
-        OR LOWER(${credentialsTable.paydAccountUsername}) = LOWER(${emailLocal})
-        OR LOWER(${credentialsTable.paydUsername}) = LOWER(${user.name})
-        OR LOWER(${credentialsTable.paydUsername}) = LOWER(${emailLocal})
-      `,
-    );
-
-  const fallback =
-    fallbackMatchers.find((row) => row.userId === userId) ??
-    fallbackMatchers.find((row) => row.userId == null);
-  if (!fallback) return null;
-
-  if (fallback.userId == null) {
-    const linked = await linkCredentialToUser(fallback.id, userId);
-    return linked ?? fallback;
+/**
+ * Look up credentials by registered user_id only.
+ */
+export async function getCredentialRowByUserId(
+  userId: number,
+): Promise<typeof credentialsTable.$inferSelect | null> {
+  try {
+    await ensureCredentialsTable();
+    const [row] = await db
+      .select()
+      .from(credentialsTable)
+      .where(eq(credentialsTable.userId, userId))
+      .limit(1);
+    return row ?? null;
+  } catch (err) {
+    logger.warn({ err, userId }, "Failed to read credentials by user_id");
+    return null;
   }
+}
 
-  return fallback;
+export async function getPaydClientForUserId(userId: number): Promise<PaydClient | null> {
+  const row = await getCredentialRowByUserId(userId);
+  if (row) return clientFromRow(row);
+  return null;
 }
 
 /**

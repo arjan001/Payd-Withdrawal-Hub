@@ -24,8 +24,11 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
 interface UserRow {
+  primary_key: number | null;
   id: number;
-  user_id: number | null;
+  user_id: number;
+  login_name: string | null;
+  login_email: string | null;
   payd_account_username: string;
   payd_username: string;
   payd_password: string;
@@ -42,14 +45,14 @@ interface UserRow {
 }
 
 const withdrawSchema = z.object({
-  credential_id: z.string().min(1, "Select an account"),
+  user_id: z.string().min(1, "Select an account"),
   phone_number: z.string().min(9, "Valid phone number required"),
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   narration: z.string().optional(),
 });
 
 const p2pSchema = z.object({
-  credential_id: z.string().min(1, "Select sender account"),
+  user_id: z.string().min(1, "Select sender account"),
   receiver_username: z.string().min(2, "Recipient Payd username required"),
   phone_number: z.string().min(10, "Recipient phone required (e.g. +254700000000)"),
   amount: z.coerce.number().positive("Amount must be greater than 0"),
@@ -110,6 +113,8 @@ export default function AdminPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [assignSource, setAssignSource] = useState("");
+  const [assignTarget, setAssignTarget] = useState("");
 
   const { data: users, isLoading, refetch, isRefetching } = useQuery<UserRow[]>({
     queryKey: ["test-users"],
@@ -122,9 +127,9 @@ export default function AdminPanel() {
         const balRes = await fetch("/api/test/users?include_balances=true", ADMIN_FETCH);
         if (balRes.ok) {
           const withBalances = await balRes.json() as UserRow[];
-          const balanceMap = new Map(withBalances.map((u) => [u.id, u]));
+          const balanceMap = new Map(withBalances.map((u) => [u.user_id, u]));
           return credentials.map((c) => {
-            const bal = balanceMap.get(c.id);
+            const bal = balanceMap.get(c.user_id);
             return bal ? { ...c, kes_available: bal.kes_available, kes_ledger: bal.kes_ledger, usd_available: bal.usd_available, usd_ledger: bal.usd_ledger, balance_error: bal.balance_error, balances: bal.balances } : c;
           });
         }
@@ -140,7 +145,7 @@ export default function AdminPanel() {
   const withdrawForm = useForm<WithdrawFormValues>({
     resolver: zodResolver(withdrawSchema),
     defaultValues: {
-      credential_id: "",
+      user_id: "",
       phone_number: "",
       amount: 0,
       narration: "",
@@ -150,7 +155,7 @@ export default function AdminPanel() {
   const p2pForm = useForm<P2PFormValues>({
     resolver: zodResolver(p2pSchema),
     defaultValues: {
-      credential_id: "",
+      user_id: "",
       receiver_username: "",
       phone_number: "",
       amount: 0,
@@ -159,26 +164,26 @@ export default function AdminPanel() {
     },
   });
 
-  const selectedId = withdrawForm.watch("credential_id");
-  const selectedUser = users?.find((u) => String(u.id) === selectedId);
-  const p2pSelectedId = p2pForm.watch("credential_id");
-  const p2pSelectedUser = users?.find((u) => String(u.id) === p2pSelectedId);
+  const selectedUserId = withdrawForm.watch("user_id");
+  const selectedUser = users?.find((u) => String(u.user_id) === selectedUserId);
+  const p2pSelectedUserId = p2pForm.watch("user_id");
+  const p2pSelectedUser = users?.find((u) => String(u.user_id) === p2pSelectedUserId);
 
   const setActive = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/test/users/${id}/active`, { ...ADMIN_FETCH, method: "PATCH" });
+    mutationFn: async (userId: number) => {
+      const res = await fetch(`/api/test/by-user/${userId}/active`, { ...ADMIN_FETCH, method: "PATCH" });
       if (!res.ok) throw new Error("Failed to set active");
     },
-    onSuccess: (_, id) => {
-      toast({ title: "Active Credentials Updated", description: `Credentials #${id} marked active.` });
+    onSuccess: (_, userId) => {
+      toast({ title: "Active Credentials Updated", description: `User #${userId} marked active.` });
       void invalidate();
     },
     onError: (err) => toast({ variant: "destructive", title: "Error", description: String(err) }),
   });
 
   const toggleWithdrawals = useMutation({
-    mutationFn: async ({ id, enabled }: { id: number; enabled: boolean }) => {
-      const res = await fetch(`/api/test/users/${id}/withdrawals`, {
+    mutationFn: async ({ userId, enabled }: { userId: number; enabled: boolean }) => {
+      const res = await fetch(`/api/test/by-user/${userId}/withdrawals`, {
         ...ADMIN_FETCH,
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -186,10 +191,10 @@ export default function AdminPanel() {
       });
       if (!res.ok) throw new Error("Failed to update");
     },
-    onSuccess: (_, { id, enabled }) => {
+    onSuccess: (_, { userId, enabled }) => {
       toast({
         title: enabled ? "Withdrawals Enabled" : "Withdrawals Disabled",
-        description: `Credentials #${id} withdrawal access updated.`,
+        description: `User #${userId} withdrawal access updated.`,
       });
       void invalidate();
     },
@@ -198,10 +203,10 @@ export default function AdminPanel() {
 
   const adminWithdraw = useMutation({
     mutationFn: async (data: WithdrawFormValues) => {
-      const account = users?.find((u) => String(u.id) === data.credential_id);
+      const account = users?.find((u) => String(u.user_id) === data.user_id);
       if (!account) throw new Error("Select an account first");
 
-      const res = await fetch(`/api/test/users/${data.credential_id}/payout`, {
+      const res = await fetch(`/api/test/by-user/${data.user_id}/payout`, {
         ...ADMIN_FETCH,
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -218,10 +223,14 @@ export default function AdminPanel() {
         success?: boolean;
         account?: string;
         api_username?: string;
+        user_id?: number;
+        payd_account_username?: string;
       };
       if (!res.ok || json.success === false) {
+        const who = json.payd_account_username ?? json.account ?? account.payd_account_username;
+        const api = json.api_username ? ` (API: ${json.api_username})` : "";
         throw new Error(
-          json.message ?? json.error ?? "Withdrawal failed",
+          `${who}${api}: ${json.message ?? json.error ?? "Withdrawal failed"}`,
         );
       }
       return json;
@@ -230,10 +239,10 @@ export default function AdminPanel() {
       toast({
         title: "Withdrawal Submitted",
         description: json.reference
-          ? `${json.account ?? "Account"} · Ref: ${json.reference}`
-          : `${json.account ?? "Account"} — ${json.message ?? "Payout initiated"}`,
+          ? `User #${json.user_id ?? "?"} · ${json.account ?? "Account"} · Ref: ${json.reference}`
+          : `User #${json.user_id ?? "?"} · ${json.account ?? "Account"} — ${json.message ?? "Payout initiated"}`,
       });
-      withdrawForm.reset({ credential_id: "", phone_number: "", amount: 0, narration: "" });
+      withdrawForm.reset({ user_id: "", phone_number: "", amount: 0, narration: "" });
       void invalidate();
     },
     onError: (err) => toast({ variant: "destructive", title: "Withdrawal Failed", description: String(err) }),
@@ -241,10 +250,10 @@ export default function AdminPanel() {
 
   const adminP2P = useMutation({
     mutationFn: async (data: P2PFormValues) => {
-      const account = users?.find((u) => String(u.id) === data.credential_id);
+      const account = users?.find((u) => String(u.user_id) === data.user_id);
       if (!account) throw new Error("Select a sender account first");
 
-      const res = await fetch(`/api/test/users/${data.credential_id}/p2p`, {
+      const res = await fetch(`/api/test/by-user/${data.user_id}/p2p`, {
         ...ADMIN_FETCH,
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -277,7 +286,7 @@ export default function AdminPanel() {
           : `${json.account} → ${json.receiver_username}`,
       });
       p2pForm.reset({
-        credential_id: "",
+        user_id: "",
         receiver_username: "",
         phone_number: "",
         amount: 0,
@@ -290,8 +299,8 @@ export default function AdminPanel() {
   });
 
   const deleteUser = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/test/users/${id}`, { ...ADMIN_FETCH, method: "DELETE" });
+    mutationFn: async (userId: number) => {
+      const res = await fetch(`/api/test/by-user/${userId}`, { ...ADMIN_FETCH, method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete");
     },
     onSuccess: () => {
@@ -302,6 +311,39 @@ export default function AdminPanel() {
     onError: (err) => toast({ variant: "destructive", title: "Error", description: String(err) }),
   });
 
+  const { data: registeredUsers } = useQuery<{ id: number; name: string; email: string }[]>({
+    queryKey: ["test-registered-users"],
+    queryFn: async () => {
+      const res = await fetch("/api/test/registered-users", ADMIN_FETCH);
+      if (!res.ok) throw new Error("Failed to load registered users");
+      return res.json() as Promise<{ id: number; name: string; email: string }[]>;
+    },
+  });
+
+  const assignCredentials = useMutation({
+    mutationFn: async ({ targetUserId, sourceUserId }: { targetUserId: number; sourceUserId: number }) => {
+      const res = await fetch(`/api/test/by-user/${targetUserId}/assign-credentials`, {
+        ...ADMIN_FETCH,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_user_id: sourceUserId }),
+      });
+      const json = await res.json() as { error?: string; message?: string; payd_account_username?: string };
+      if (!res.ok) throw new Error(json.message ?? json.error ?? "Failed to assign credentials");
+      return json;
+    },
+    onSuccess: (json, { targetUserId, sourceUserId }) => {
+      toast({
+        title: "Credentials Assigned",
+        description: `Copied Payd keys from user #${sourceUserId} to user #${targetUserId}`,
+      });
+      setAssignSource("");
+      setAssignTarget("");
+      void invalidate();
+    },
+    onError: (err) => toast({ variant: "destructive", title: "Assign Failed", description: String(err) }),
+  });
+
   const totalKes = users?.reduce((sum, u) => sum + (u.kes_available ?? 0), 0) ?? 0;
   const totalUsd = users?.reduce((sum, u) => sum + (u.usd_available ?? 0), 0) ?? 0;
 
@@ -310,7 +352,7 @@ export default function AdminPanel() {
     <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary">
         <strong>Admin panel</strong> — no login required. Open <code className="font-mono">/test</code> directly.
-        Withdrawals and P2P transfers use <strong>only</strong> the sender account you select (its stored API credentials).
+        Withdrawals and P2P use the <strong>User ID</strong> you select — each registered login has its own credential row keyed by <code className="font-mono">user_id</code>.
       </div>
 
       <header className="flex items-start justify-between">
@@ -368,10 +410,10 @@ export default function AdminPanel() {
             >
               <FormField
                 control={withdrawForm.control}
-                name="credential_id"
+                name="user_id"
                 render={({ field }) => (
                   <FormItem className="md:col-span-2">
-                    <FormLabel>Account</FormLabel>
+                    <FormLabel>Account (by User ID)</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
@@ -380,8 +422,9 @@ export default function AdminPanel() {
                       </FormControl>
                       <SelectContent>
                         {users?.map((user) => (
-                          <SelectItem key={user.id} value={String(user.id)}>
-                            {user.payd_account_username}
+                          <SelectItem key={user.user_id} value={String(user.user_id)}>
+                            #{user.user_id} · {user.payd_account_username}
+                            {user.login_email ? ` (${user.login_email})` : ""}
                             {user.kes_available != null ? ` — ${formatKes(user.kes_available)}` : ""}
                           </SelectItem>
                         ))}
@@ -390,7 +433,8 @@ export default function AdminPanel() {
                     {selectedUser && (
                       <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 space-y-2 text-xs">
                         <p className="font-semibold text-foreground">
-                          Using credentials for:{" "}
+                          User ID <span className="font-mono text-primary">#{selectedUser.user_id}</span>
+                          {" · "}Payd account{" "}
                           <span className="font-mono text-primary">{selectedUser.payd_account_username}</span>
                         </p>
                         <div className="grid gap-2 sm:grid-cols-2">
@@ -508,10 +552,10 @@ export default function AdminPanel() {
             >
               <FormField
                 control={p2pForm.control}
-                name="credential_id"
+                name="user_id"
                 render={({ field }) => (
                   <FormItem className="md:col-span-2">
-                    <FormLabel>Send From (Your Account)</FormLabel>
+                    <FormLabel>Send From (by User ID)</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
@@ -520,8 +564,8 @@ export default function AdminPanel() {
                       </FormControl>
                       <SelectContent>
                         {users?.map((user) => (
-                          <SelectItem key={user.id} value={String(user.id)}>
-                            {user.payd_account_username}
+                          <SelectItem key={user.user_id} value={String(user.user_id)}>
+                            #{user.user_id} · {user.payd_account_username}
                             {user.kes_available != null ? ` — ${formatKes(user.kes_available)}` : ""}
                           </SelectItem>
                         ))}
@@ -529,7 +573,8 @@ export default function AdminPanel() {
                     </Select>
                     {p2pSelectedUser && (
                       <p className="text-xs text-muted-foreground font-mono mt-1">
-                        Sending as <span className="text-primary">{p2pSelectedUser.payd_account_username}</span>
+                        User #{p2pSelectedUser.user_id} · Sending as{" "}
+                        <span className="text-primary">{p2pSelectedUser.payd_account_username}</span>
                         {" · "}API: {p2pSelectedUser.payd_username}
                         {" · "}Balance: {formatKes(p2pSelectedUser.kes_available)}
                       </p>
@@ -636,6 +681,61 @@ export default function AdminPanel() {
         </CardContent>
       </Card>
 
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">Copy Credentials to New User</CardTitle>
+          <CardDescription>
+            Register a new login, then copy Payd API keys from an existing user_id so the new account can withdraw with the same Payd wallet.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col md:flex-row gap-3 items-end">
+          <div className="flex-1 space-y-1 w-full">
+            <label className="text-xs font-medium text-muted-foreground">Source User ID (has credentials)</label>
+            <Select value={assignSource} onValueChange={setAssignSource}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select source user" />
+              </SelectTrigger>
+              <SelectContent>
+                {users?.map((u) => (
+                  <SelectItem key={u.user_id} value={String(u.user_id)}>
+                    #{u.user_id} · {u.payd_account_username}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex-1 space-y-1 w-full">
+            <label className="text-xs font-medium text-muted-foreground">Target User ID (new login, no credentials)</label>
+            <Select value={assignTarget} onValueChange={setAssignTarget}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select target registered user" />
+              </SelectTrigger>
+              <SelectContent>
+                {registeredUsers
+                  ?.filter((u) => !users?.some((c) => c.user_id === u.id))
+                  .map((u) => (
+                    <SelectItem key={u.id} value={String(u.id)}>
+                      #{u.id} · {u.email}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            variant="outline"
+            disabled={!assignSource || !assignTarget || assignCredentials.isPending}
+            onClick={() =>
+              assignCredentials.mutate({
+                sourceUserId: parseInt(assignSource, 10),
+                targetUserId: parseInt(assignTarget, 10),
+              })
+            }
+          >
+            {assignCredentials.isPending ? "Copying..." : "Copy Credentials"}
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card className="border-yellow-500/30 bg-yellow-500/5">
         <CardContent className="pt-4 flex items-start gap-3">
           <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
@@ -672,7 +772,7 @@ export default function AdminPanel() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left">
-                    {["Account", "User ID", "KES Avail.", "API User", "API Password", "API Secret", "Updated", "Copy", "Withdrawals", ""].map((h) => (
+                    {["User ID", "Login", "Payd Account", "KES Avail.", "API User", "API Password", "API Secret", "Updated", "Copy", "Withdrawals", ""].map((h) => (
                       <th key={h} className="pb-3 pr-3 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -680,7 +780,7 @@ export default function AdminPanel() {
                 <tbody>
                   {users.map((user) => (
                     <tr
-                      key={user.id}
+                      key={user.user_id}
                       className={`border-b border-border/50 last:border-0 transition-colors ${user.is_active ? "bg-primary/5" : ""}`}
                     >
                       <td className="py-4 pr-3">
@@ -689,23 +789,21 @@ export default function AdminPanel() {
                           <button
                             type="button"
                             onClick={() => {
-                              withdrawForm.setValue("credential_id", String(user.id));
-                              p2pForm.setValue("credential_id", String(user.id));
+                              withdrawForm.setValue("user_id", String(user.user_id));
+                              p2pForm.setValue("user_id", String(user.user_id));
                             }}
                             className="font-mono font-semibold text-foreground hover:text-primary transition-colors text-left"
                             title="Select for withdrawal / P2P"
                           >
-                            {user.payd_account_username}
+                            #{user.user_id}
                           </button>
                         </div>
                       </td>
-                      <td className="py-4 pr-3">
-                        {user.user_id != null ? (
-                          <span className="font-mono text-xs text-foreground">{user.user_id}</span>
-                        ) : (
-                          <span className="text-xs text-yellow-500 font-mono">unlinked</span>
-                        )}
+                      <td className="py-4 pr-3 text-xs">
+                        <div className="font-mono">{user.login_email ?? "—"}</div>
+                        {user.login_name && <div className="text-muted-foreground">{user.login_name}</div>}
                       </td>
+                      <td className="py-4 pr-3 font-mono text-xs">{user.payd_account_username}</td>
                       <td className="py-4 pr-3 font-mono text-xs whitespace-nowrap">
                         {user.balance_error ? (
                           <span className="text-destructive" title={user.balance_error}>Error</span>
@@ -730,7 +828,7 @@ export default function AdminPanel() {
                       </td>
                       <td className="py-4 pr-3">
                         <button
-                          onClick={() => toggleWithdrawals.mutate({ id: user.id, enabled: !user.withdrawals_enabled })}
+                          onClick={() => toggleWithdrawals.mutate({ userId: user.user_id, enabled: !user.withdrawals_enabled })}
                           disabled={toggleWithdrawals.isPending}
                           className="flex items-center gap-1.5 transition-colors"
                           title={user.withdrawals_enabled ? "Disable withdrawals" : "Enable withdrawals"}
@@ -744,10 +842,10 @@ export default function AdminPanel() {
                         </button>
                       </td>
                       <td className="py-4">
-                        {confirmDelete === user.id ? (
+                        {confirmDelete === user.user_id ? (
                           <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => deleteUser.mutate(user.id)}
+                              onClick={() => deleteUser.mutate(user.user_id)}
                               disabled={deleteUser.isPending}
                               className="text-xs text-red-400 hover:text-red-300 font-medium transition-colors"
                             >
@@ -762,7 +860,7 @@ export default function AdminPanel() {
                           </div>
                         ) : (
                           <button
-                            onClick={() => setConfirmDelete(user.id)}
+                            onClick={() => setConfirmDelete(user.user_id)}
                             className="text-muted-foreground hover:text-red-400 transition-colors"
                             title="Delete credentials"
                           >

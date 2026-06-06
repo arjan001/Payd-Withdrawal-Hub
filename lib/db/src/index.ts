@@ -69,9 +69,9 @@ async function _run(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS "credentials_user_id_idx"
       ON "credentials" USING btree ("user_id")
   `);
+  -- Allow same Payd account credentials on multiple registered users (unique key is user_id only)
   await db.execute(dsql`
-    CREATE UNIQUE INDEX IF NOT EXISTS "credentials_account_username_idx"
-      ON "credentials" USING btree ("payd_account_username")
+    DROP INDEX IF EXISTS "credentials_account_username_idx"
   `);
   // Add user_id column to existing installs that pre-date multi-tenancy
   await db.execute(dsql`

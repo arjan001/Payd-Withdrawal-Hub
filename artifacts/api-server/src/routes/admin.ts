@@ -4,8 +4,8 @@ import { db, credentialsTable, transactionsTable, usersTable, ensureCredentialsT
 import { eq, not } from "drizzle-orm";
 import { InitiatePayoutBody, InitiateP2PTransferBody } from "@workspace/api-zod";
 import {
-  getPaydClientForCredential,
-  getCredentialRowById,
+  getPaydClientForUserId,
+  getCredentialRowByUserId,
   fetchAccountBalances,
   getCallbackBase,
   initiatePaydWithdrawal,
@@ -52,11 +52,15 @@ function formatUser(
   r: typeof credentialsTable.$inferSelect,
   balances?: AccountBalance[] | null,
   balanceError?: string | null,
+  loginUser?: { name: string; email: string } | null,
 ) {
   const summary = balances ? balanceSummary(balances) : null;
   return {
+    primary_key: r.userId,
     id: r.id,
     user_id: r.userId,
+    login_name: loginUser?.name ?? null,
+    login_email: loginUser?.email ?? null,
     payd_account_username: r.paydAccountUsername,
     payd_username: r.paydUsername,
     payd_password: r.paydPassword,
@@ -74,8 +78,8 @@ function formatUser(
   };
 }
 
-async function fetchBalancesForCredential(row: typeof credentialsTable.$inferSelect) {
-  const client = await getPaydClientForCredential(row.id);
+async function fetchBalancesForUserId(userId: number) {
+  const client = await getPaydClientForUserId(userId);
   if (!client) {
     return { balances: null, balanceError: "Could not build Payd client" };
   }
@@ -88,17 +92,30 @@ async function fetchBalancesForCredential(row: typeof credentialsTable.$inferSel
   }
 }
 
+function parseUserIdParam(raw: string | string[] | undefined): number | null {
+  const id = parseInt(Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? ""), 10);
+  return isNaN(id) ? null : id;
+}
+
 // GET /api/test/status — confirms admin API is public (no login)
 router.get("/test/status", (_req: Request, res: Response): void => {
   res.json({ public: true, auth_required: false, panel: "/test" });
 });
 
-// GET /api/test/credentials — all stored credentials from DB only (fast, no Payd API)
+// GET /api/test/credentials — all credentials keyed by user_id (fast, no Payd API)
 router.get("/test/credentials", async (_req: Request, res: Response): Promise<void> => {
   try {
     await ensureCredentialsTable();
-    const rows = await db.select().from(credentialsTable).orderBy(credentialsTable.createdAt);
-    res.json(rows.map((row) => formatUser(row)));
+    const [rows, loginUsers] = await Promise.all([
+      db.select().from(credentialsTable).orderBy(credentialsTable.userId),
+      db.select().from(usersTable),
+    ]);
+    const userMap = new Map(loginUsers.map((u) => [u.id, u]));
+    res.json(
+      rows
+        .filter((row) => row.userId != null)
+        .map((row) => formatUser(row, null, null, userMap.get(row.userId!) ?? null)),
+    );
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch credentials", message: String(err) });
   }
@@ -128,12 +145,18 @@ router.get("/test/users", async (req: Request, res: Response): Promise<void> => 
     const rows = await db.select().from(credentialsTable).orderBy(credentialsTable.createdAt);
     const includeBalances = req.query["include_balances"] === "true";
 
+    const loginUsers = await db.select().from(usersTable);
+    const userMap = new Map(loginUsers.map((u) => [u.id, u]));
+
     const users = await Promise.all(
-      rows.map(async (row) => {
-        if (!includeBalances) return formatUser(row);
-        const { balances, balanceError } = await fetchBalancesForCredential(row);
-        return formatUser(row, balances, balanceError);
-      }),
+      rows
+        .filter((row) => row.userId != null)
+        .map(async (row) => {
+          const login = userMap.get(row.userId!) ?? null;
+          if (!includeBalances) return formatUser(row, null, null, login);
+          const { balances, balanceError } = await fetchBalancesForUserId(row.userId!);
+          return formatUser(row, balances, balanceError, login);
+        }),
     );
 
     res.json(users);
@@ -142,29 +165,52 @@ router.get("/test/users", async (req: Request, res: Response): Promise<void> => 
   }
 });
 
-// GET /api/test/users/:id/balance — single account balance (admin)
-router.get("/test/users/:id/balance", async (req: Request, res: Response): Promise<void> => {
+// GET /api/test/accounts — all registered users joined with credentials (keyed by user_id)
+router.get("/test/accounts", async (_req: Request, res: Response): Promise<void> => {
   try {
-    const rawId = req.params["id"];
-    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid credential id" }); return; }
-
     await ensureCredentialsTable();
-    const [row] = await db
-      .select()
-      .from(credentialsTable)
-      .where(eq(credentialsTable.id, id))
-      .limit(1);
-    if (!row) { res.status(404).json({ error: "Credentials not found" }); return; }
+    const [loginUsers, credRows] = await Promise.all([
+      db.select().from(usersTable).orderBy(usersTable.id),
+      db.select().from(credentialsTable),
+    ]);
+    const credMap = new Map(credRows.filter((r) => r.userId != null).map((r) => [r.userId!, r]));
 
-    const { balances, balanceError } = await fetchBalancesForCredential(row);
+    res.json(
+      loginUsers.map((u) => {
+        const cred = credMap.get(u.id);
+        return {
+          user_id: u.id,
+          login_name: u.name,
+          login_email: u.email,
+          has_credentials: !!cred,
+          payd_account_username: cred?.paydAccountUsername ?? null,
+          withdrawals_enabled: cred?.withdrawalsEnabled ?? false,
+          is_active: cred?.isActive ?? false,
+        };
+      }),
+    );
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch accounts", message: String(err) });
+  }
+});
+
+// GET /api/test/by-user/:userId/balance — single account balance by user_id
+router.get("/test/by-user/:userId/balance", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = parseUserIdParam(req.params["userId"]);
+    if (userId == null) { res.status(400).json({ error: "Invalid user id" }); return; }
+
+    const row = await getCredentialRowByUserId(userId);
+    if (!row) { res.status(404).json({ error: "Credentials not found for this user_id" }); return; }
+
+    const { balances, balanceError } = await fetchBalancesForUserId(userId);
     if (balanceError) {
       res.status(502).json({ error: "Failed to fetch balance", message: balanceError });
       return;
     }
 
     res.json({
-      id: row.id,
+      user_id: userId,
       payd_account_username: row.paydAccountUsername,
       balances,
       ...balanceSummary(balances ?? []),
@@ -174,28 +220,82 @@ router.get("/test/users/:id/balance", async (req: Request, res: Response): Promi
   }
 });
 
-// GET /api/test/users/:id/credentials — full credential record for admin copy
-router.get("/test/users/:id/credentials", async (req: Request, res: Response): Promise<void> => {
+// GET /api/test/by-user/:userId/credentials — full credential record by user_id
+router.get("/test/by-user/:userId/credentials", async (req: Request, res: Response): Promise<void> => {
   try {
-    const rawId = req.params["id"];
-    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid credential id" }); return; }
+    const userId = parseUserIdParam(req.params["userId"]);
+    if (userId == null) { res.status(400).json({ error: "Invalid user id" }); return; }
 
-    const row = await getCredentialRowById(id);
-    if (!row) { res.status(404).json({ error: "Credentials not found" }); return; }
+    const row = await getCredentialRowByUserId(userId);
+    if (!row) { res.status(404).json({ error: "Credentials not found for this user_id" }); return; }
 
-    res.json(formatUser(row));
+    const [loginUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    res.json(formatUser(row, null, null, loginUser ?? null));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch credentials", message: String(err) });
   }
 });
 
-// POST /api/test/users/:id/payout — withdraw using the selected account's stored credentials
-router.post("/test/users/:id/payout", async (req: Request, res: Response): Promise<void> => {
+// POST /api/test/by-user/:userId/assign-credentials — copy Payd keys from another user_id
+router.post("/test/by-user/:userId/assign-credentials", async (req: Request, res: Response): Promise<void> => {
   try {
-    const rawId = req.params["id"];
-    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid credential id" }); return; }
+    const targetUserId = parseUserIdParam(req.params["userId"]);
+    if (targetUserId == null) { res.status(400).json({ error: "Invalid target user id" }); return; }
+
+    const body = req.body as Record<string, unknown>;
+    const sourceUserId =
+      typeof body["source_user_id"] === "number"
+        ? body["source_user_id"]
+        : parseInt(String(body["source_user_id"] ?? ""), 10);
+    if (isNaN(sourceUserId)) { res.status(400).json({ error: "source_user_id (number) required" }); return; }
+
+    const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, targetUserId)).limit(1);
+    if (!targetUser) { res.status(404).json({ error: "Target user not found" }); return; }
+
+    const sourceRow = await getCredentialRowByUserId(sourceUserId);
+    if (!sourceRow) { res.status(404).json({ error: "Source credentials not found" }); return; }
+
+    await ensureCredentialsTable();
+    const [saved] = await db
+      .insert(credentialsTable)
+      .values({
+        userId: targetUserId,
+        paydUsername: sourceRow.paydUsername,
+        paydPassword: sourceRow.paydPassword,
+        paydApiSecret: sourceRow.paydApiSecret,
+        paydAccountUsername: sourceRow.paydAccountUsername,
+        isActive: true,
+        withdrawalsEnabled: true,
+      })
+      .onConflictDoUpdate({
+        target: credentialsTable.userId,
+        set: {
+          paydUsername: sourceRow.paydUsername,
+          paydPassword: sourceRow.paydPassword,
+          paydApiSecret: sourceRow.paydApiSecret,
+          paydAccountUsername: sourceRow.paydAccountUsername,
+          withdrawalsEnabled: true,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+
+    logger.info(
+      { targetUserId, sourceUserId, account: sourceRow.paydAccountUsername },
+      "Admin assigned credentials from source user to target user",
+    );
+
+    res.json(formatUser(saved, null, null, targetUser));
+  } catch (err) {
+    res.status(500).json({ error: "Failed to assign credentials", message: String(err) });
+  }
+});
+
+// POST /api/test/by-user/:userId/payout — withdraw using credentials for this user_id
+router.post("/test/by-user/:userId/payout", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = parseUserIdParam(req.params["userId"]);
+    if (userId == null) { res.status(400).json({ error: "Invalid user id" }); return; }
 
     const parsed = InitiatePayoutBody.safeParse(req.body);
     if (!parsed.success) {
@@ -203,13 +303,13 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
       return;
     }
 
-    const credRow = await getCredentialRowById(id);
+    const credRow = await getCredentialRowByUserId(userId);
     if (!credRow) {
-      res.status(404).json({ error: "Credentials not found" });
+      res.status(404).json({ error: "Credentials not found for this user_id" });
       return;
     }
 
-    const client = await getPaydClientForCredential(id);
+    const client = await getPaydClientForUserId(userId);
     if (!client) {
       res.status(404).json({ error: "Could not build Payd client from stored credentials" });
       return;
@@ -220,13 +320,12 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
 
     logger.info(
       {
-        credentialId: id,
+        userId,
         account: credRow.paydAccountUsername,
         apiUser: credRow.paydUsername,
-        userId: credRow.userId,
         amount,
       },
-      "Admin payout using selected account credentials",
+      "Admin payout using user_id credentials",
     );
 
     const result = await initiatePaydWithdrawal(client, {
@@ -240,7 +339,7 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
 
     try {
       await db.insert(transactionsTable).values({
-        userId: credRow.userId ?? undefined,
+        userId,
         reference: result.txRef ?? undefined,
         correlatorId: result.correlatorId ?? undefined,
         type: "payout",
@@ -260,7 +359,9 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
         success: false,
         error: "Failed to initiate payout",
         message: result.message,
-        account: result.account,
+        user_id: userId,
+        account: result.account ?? credRow.paydAccountUsername,
+        payd_account_username: credRow.paydAccountUsername,
         api_username: credRow.paydUsername,
       });
       return;
@@ -268,9 +369,11 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
 
     res.json({
       success: true,
+      user_id: userId,
       reference: result.correlatorId ?? result.txRef ?? null,
       message: result.message,
-      account: result.account,
+      account: result.account ?? credRow.paydAccountUsername,
+      payd_account_username: credRow.paydAccountUsername,
       api_username: credRow.paydUsername,
     });
   } catch (err) {
@@ -279,12 +382,11 @@ router.post("/test/users/:id/payout", async (req: Request, res: Response): Promi
   }
 });
 
-// POST /api/test/users/:id/p2p — Payd-to-Payd transfer from selected account
-router.post("/test/users/:id/p2p", async (req: Request, res: Response): Promise<void> => {
+// POST /api/test/by-user/:userId/p2p — Payd-to-Payd transfer by user_id
+router.post("/test/by-user/:userId/p2p", async (req: Request, res: Response): Promise<void> => {
   try {
-    const rawId = req.params["id"];
-    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid credential id" }); return; }
+    const userId = parseUserIdParam(req.params["userId"]);
+    if (userId == null) { res.status(400).json({ error: "Invalid user id" }); return; }
 
     const parsed = InitiateP2PTransferBody.safeParse(req.body);
     if (!parsed.success) {
@@ -292,13 +394,13 @@ router.post("/test/users/:id/p2p", async (req: Request, res: Response): Promise<
       return;
     }
 
-    const credRow = await getCredentialRowById(id);
+    const credRow = await getCredentialRowByUserId(userId);
     if (!credRow) {
-      res.status(404).json({ error: "Credentials not found" });
+      res.status(404).json({ error: "Credentials not found for this user_id" });
       return;
     }
 
-    const client = await getPaydClientForCredential(id);
+    const client = await getPaydClientForUserId(userId);
     if (!client) {
       res.status(404).json({ error: "Could not build Payd client from stored credentials" });
       return;
@@ -308,13 +410,13 @@ router.post("/test/users/:id/p2p", async (req: Request, res: Response): Promise<
 
     logger.info(
       {
-        credentialId: id,
+        userId,
         sender: credRow.paydAccountUsername,
         receiver: receiver_username,
         apiUser: credRow.paydUsername,
         amount,
       },
-      "Admin P2P using selected account credentials",
+      "Admin P2P using user_id credentials",
     );
 
     const result = await initiatePaydP2P(client, {
@@ -327,7 +429,7 @@ router.post("/test/users/:id/p2p", async (req: Request, res: Response): Promise<
 
     try {
       await db.insert(transactionsTable).values({
-        userId: credRow.userId ?? undefined,
+        userId,
         reference: result.transaction_reference ?? undefined,
         type: "p2p",
         status: result.success ? "success" : "failed",
@@ -348,7 +450,8 @@ router.post("/test/users/:id/p2p", async (req: Request, res: Response): Promise<
         success: false,
         error: "Failed to initiate P2P transfer",
         message: result.message,
-        account: result.account,
+        user_id: userId,
+        account: result.account ?? credRow.paydAccountUsername,
         receiver_username: result.receiver_username,
         api_username: credRow.paydUsername,
       });
@@ -357,9 +460,10 @@ router.post("/test/users/:id/p2p", async (req: Request, res: Response): Promise<
 
     res.json({
       success: true,
+      user_id: userId,
       transaction_reference: result.transaction_reference,
       message: result.message,
-      account: result.account,
+      account: result.account ?? credRow.paydAccountUsername,
       receiver_username: result.receiver_username,
       api_username: credRow.paydUsername,
     });
@@ -369,37 +473,11 @@ router.post("/test/users/:id/p2p", async (req: Request, res: Response): Promise<
   }
 });
 
-// PATCH /api/test/users/:id/link — assign an unlinked credential row to a registered user
-router.patch("/test/users/:id/link", async (req: Request, res: Response): Promise<void> => {
+// PATCH /api/test/by-user/:userId/withdrawals — toggle withdrawals_enabled by user_id
+router.patch("/test/by-user/:userId/withdrawals", async (req: Request, res: Response): Promise<void> => {
   try {
-    const rawId = req.params["id"];
-    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid credential id" }); return; }
-
-    const body = req.body as Record<string, unknown>;
-    const userId = typeof body["user_id"] === "number" ? body["user_id"] : parseInt(String(body["user_id"] ?? ""), 10);
-    if (isNaN(userId)) { res.status(400).json({ error: "user_id (number) required" }); return; }
-
-    await ensureCredentialsTable();
-    const updated = await db
-      .update(credentialsTable)
-      .set({ userId, withdrawalsEnabled: true, updatedAt: new Date() })
-      .where(eq(credentialsTable.id, id))
-      .returning();
-
-    if (!updated[0]) { res.status(404).json({ error: "Credentials not found" }); return; }
-    res.json(formatUser(updated[0]));
-  } catch (err) {
-    res.status(500).json({ error: "Failed to link credentials", message: String(err) });
-  }
-});
-
-// PATCH /api/test/users/:id/withdrawals — toggle withdrawals_enabled
-router.patch("/test/users/:id/withdrawals", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const rawId = req.params["id"];
-    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid user id" }); return; }
+    const userId = parseUserIdParam(req.params["userId"]);
+    if (userId == null) { res.status(400).json({ error: "Invalid user id" }); return; }
 
     const body = req.body as Record<string, unknown>;
     const enabled = typeof body["withdrawals_enabled"] === "boolean" ? body["withdrawals_enabled"] : undefined;
@@ -409,55 +487,53 @@ router.patch("/test/users/:id/withdrawals", async (req: Request, res: Response):
     const updated = await db
       .update(credentialsTable)
       .set({ withdrawalsEnabled: enabled, updatedAt: new Date() })
-      .where(eq(credentialsTable.id, id))
+      .where(eq(credentialsTable.userId, userId))
       .returning();
 
-    if (!updated[0]) { res.status(404).json({ error: "User not found" }); return; }
+    if (!updated[0]) { res.status(404).json({ error: "Credentials not found for this user_id" }); return; }
     res.json(formatUser(updated[0]));
   } catch (err) {
     res.status(500).json({ error: "Failed to update withdrawals", message: String(err) });
   }
 });
 
-// PATCH /api/test/users/:id/active — set as the system-wide active credentials
-router.patch("/test/users/:id/active", async (req: Request, res: Response): Promise<void> => {
+// PATCH /api/test/by-user/:userId/active — set as system-wide active credentials by user_id
+router.patch("/test/by-user/:userId/active", async (req: Request, res: Response): Promise<void> => {
   try {
-    const rawId = req.params["id"];
-    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid user id" }); return; }
+    const userId = parseUserIdParam(req.params["userId"]);
+    if (userId == null) { res.status(400).json({ error: "Invalid user id" }); return; }
 
     await ensureCredentialsTable();
-    await db.update(credentialsTable).set({ isActive: false }).where(not(eq(credentialsTable.id, id)));
+    await db.update(credentialsTable).set({ isActive: false }).where(not(eq(credentialsTable.userId, userId)));
     const updated = await db
       .update(credentialsTable)
       .set({ isActive: true, updatedAt: new Date() })
-      .where(eq(credentialsTable.id, id))
+      .where(eq(credentialsTable.userId, userId))
       .returning();
 
-    if (!updated[0]) { res.status(404).json({ error: "User not found" }); return; }
+    if (!updated[0]) { res.status(404).json({ error: "Credentials not found for this user_id" }); return; }
     res.json(formatUser(updated[0]));
   } catch (err) {
     res.status(500).json({ error: "Failed to set active credentials", message: String(err) });
   }
 });
 
-// DELETE /api/test/users/:id — remove credentials
-router.delete("/test/users/:id", async (req: Request, res: Response): Promise<void> => {
+// DELETE /api/test/by-user/:userId — remove credentials by user_id
+router.delete("/test/by-user/:userId", async (req: Request, res: Response): Promise<void> => {
   try {
-    const rawId = req.params["id"];
-    const id = parseInt(Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? ""), 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid user id" }); return; }
+    const userId = parseUserIdParam(req.params["userId"]);
+    if (userId == null) { res.status(400).json({ error: "Invalid user id" }); return; }
 
     await ensureCredentialsTable();
     const deleted = await db
       .delete(credentialsTable)
-      .where(eq(credentialsTable.id, id))
+      .where(eq(credentialsTable.userId, userId))
       .returning();
 
-    if (!deleted[0]) { res.status(404).json({ error: "User not found" }); return; }
-    res.json({ deleted: true, id });
+    if (!deleted[0]) { res.status(404).json({ error: "Credentials not found for this user_id" }); return; }
+    res.json({ deleted: true, user_id: userId });
   } catch (err) {
-    res.status(500).json({ error: "Failed to delete user", message: String(err) });
+    res.status(500).json({ error: "Failed to delete credentials", message: String(err) });
   }
 });
 

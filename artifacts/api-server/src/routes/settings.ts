@@ -104,46 +104,21 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
       updatedAt: new Date(),
     };
 
-    const [existingByUser] = await db
-      .select()
-      .from(credentialsTable)
-      .where(eq(credentialsTable.userId, userId))
-      .limit(1);
-
-    const [existingByAccount] = await db
-      .select()
-      .from(credentialsTable)
-      .where(eq(credentialsTable.paydAccountUsername, payd_account_username))
-      .limit(1);
-
-    let saved: typeof credentialsTable.$inferSelect | undefined;
-
-    if (existingByAccount && existingByAccount.userId != null && existingByAccount.userId !== userId) {
-      res.status(409).json({
-        error: "Account already linked",
-        message: "This Payd account is already linked to another registered user.",
-      });
-      return;
-    }
-
-    if (existingByAccount && (existingByAccount.userId == null || existingByAccount.userId === userId)) {
-      [saved] = await db
-        .update(credentialsTable)
-        .set(credentialPatch)
-        .where(eq(credentialsTable.id, existingByAccount.id))
-        .returning();
-    } else if (existingByUser) {
-      [saved] = await db
-        .update(credentialsTable)
-        .set(credentialPatch)
-        .where(eq(credentialsTable.id, existingByUser.id))
-        .returning();
-    } else {
-      [saved] = await db
-        .insert(credentialsTable)
-        .values(credentialPatch)
-        .returning();
-    }
+    const [saved] = await db
+      .insert(credentialsTable)
+      .values(credentialPatch)
+      .onConflictDoUpdate({
+        target: credentialsTable.userId,
+        set: {
+          paydUsername: payd_username,
+          paydPassword: payd_password,
+          paydApiSecret: payd_api_secret ?? null,
+          paydAccountUsername: payd_account_username,
+          withdrawalsEnabled: true,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
 
     if (!saved) {
       res.status(500).json({ error: "Failed to save credentials" });

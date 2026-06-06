@@ -19,7 +19,6 @@ export const credentialsTable = pgTable(
   },
   (t) => [
     uniqueIndex("credentials_user_id_idx").on(t.userId),
-    uniqueIndex("credentials_account_username_idx").on(t.paydAccountUsername),
   ],
 );
 
