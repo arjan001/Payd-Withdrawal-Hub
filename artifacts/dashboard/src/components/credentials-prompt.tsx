@@ -56,10 +56,10 @@ export default function CredentialsPrompt() {
     saveCredentials.mutate(
       {
         data: {
-          payd_account_username: data.payd_account_username,
-          payd_username: data.payd_username,
-          payd_password: data.payd_password,
-          payd_api_secret: data.payd_api_secret || null,
+          payd_account_username: data.payd_account_username.trim().replace(/\s+/g, ""),
+          payd_username: data.payd_username.trim().replace(/\s+/g, ""),
+          payd_password: data.payd_password.trim(),
+          payd_api_secret: data.payd_api_secret?.trim() || null,
         },
       },
       {

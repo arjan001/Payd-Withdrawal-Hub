@@ -56,10 +56,23 @@ export default function Payout() {
         }),
       });
 
-      const json = await res.json() as { reference?: string; message?: string; error?: string; success?: boolean };
+      const json = await res.json() as {
+        reference?: string;
+        message?: string;
+        error?: string;
+        success?: boolean;
+        account?: string;
+        payd_account_username?: string;
+        api_username?: string;
+        user_id?: number;
+      };
 
       if (!res.ok || json.success === false) {
-        setFailedMessage(json.message ?? json.error ?? "Unable to process the withdrawal at this time. Please try again later.");
+        const paydAccount = json.payd_account_username ?? json.account ?? account?.username;
+        const api = json.api_username ? ` · API: ${json.api_username}` : "";
+        const who = paydAccount ? `${paydAccount}${api}` : "Withdrawal";
+        const detail = json.message ?? json.error ?? "Unable to process the withdrawal at this time. Please try again later.";
+        setFailedMessage(`${who}: ${detail}`);
         setFailedOpen(true);
         return;
       }

@@ -16,8 +16,15 @@ import {
   InitiateP2PTransferResponse,
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
-import { db, transactionsTable } from "@workspace/db";
-import { getPaydClientForUser, getCallbackBase, fetchAccountBalances, initiatePaydWithdrawal } from "../lib/payd";
+import { db, credentialsTable, transactionsTable } from "@workspace/db";
+import {
+  getPaydClientForUser,
+  getCredentialRowByUserId,
+  getCallbackBase,
+  fetchAccountBalances,
+  initiatePaydWithdrawal,
+  extractPaydResponseMessage,
+} from "../lib/payd";
 import { logger } from "../lib/logger";
 import { type AuthRequest } from "../middlewares/auth";
 
@@ -37,6 +44,10 @@ function paydError(err: unknown): { status: number; message: string } {
       (typeof data === "object" && data !== null && "error_message" in data
         ? String((data as Record<string, unknown>)["error_message"])
         : null) ||
+      (typeof data === "object" && data !== null && "err" in data
+        ? String((data as Record<string, unknown>)["err"])
+        : null) ||
+      (typeof data === "object" && data !== null ? extractPaydResponseMessage(data) : null) ||
       err.message ||
       "Unknown error";
     return { status, message };
@@ -223,12 +234,29 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    let credRow = await getCredentialRowByUserId(userId);
+    if (credRow && !credRow.withdrawalsEnabled) {
+      const [updated] = await db
+        .update(credentialsTable)
+        .set({ withdrawalsEnabled: true, updatedAt: new Date() })
+        .where(eq(credentialsTable.userId, userId))
+        .returning();
+      if (updated) credRow = updated;
+    }
+
     const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } = parsed.data;
-    const callbackUrl = `${getCallbackBase()}/api/webhook/payd`;
+    const callbackUrl = `${getCallbackBase(req)}/api/webhook/payd`;
 
     req.log.info(
-      { userId, account: client.accountUsername, amount, apiUser: client.accountUsername },
-      "Initiating payout with user credentials",
+      {
+        userId,
+        account: client.accountUsername,
+        apiUsername: credRow?.paydUsername ?? null,
+        amount,
+        callbackUrl,
+        withdrawalsEnabled: credRow?.withdrawalsEnabled ?? null,
+      },
+      "Initiating payout with user_id credentials",
     );
 
     const result = await initiatePaydWithdrawal(client, {
@@ -264,7 +292,10 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
         error: "Failed to initiate payout",
         message: result.message,
         success: false,
+        user_id: userId,
         account: result.account,
+        payd_account_username: credRow?.paydAccountUsername ?? result.account,
+        api_username: credRow?.paydUsername ?? null,
       });
       return;
     }

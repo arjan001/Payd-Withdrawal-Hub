@@ -1,4 +1,5 @@
 import axios from "axios";
+import type { Request } from "express";
 import { db, credentialsTable, ensureCredentialsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger";
@@ -140,6 +141,16 @@ export async function initiatePaydP2P(
   };
 }
 
+export function extractPaydResponseMessage(data: unknown): string {
+  if (!data || typeof data !== "object") return "Unknown Payd API error";
+  const d = data as Record<string, unknown>;
+  const parts = [d["message"], d["err"], d["error"], d["description"], d["error_message"]]
+    .filter((v) => typeof v === "string" && v.trim().length > 0)
+    .map((v) => String(v).trim());
+  const unique = [...new Set(parts)];
+  return unique.join(", ") || "Payout failed";
+}
+
 export async function initiatePaydWithdrawal(
   client: PaydClient,
   params: {
@@ -154,22 +165,34 @@ export async function initiatePaydWithdrawal(
   const phone_number = normalizeKenyanPayoutPhone(params.phone_number);
   const username = client.accountUsername;
 
-  const rawData = await client.post<Record<string, unknown>>("/api/v2/withdrawal", {
-    username,
-    phone_number,
-    amount: params.amount,
-    narration: params.narration ?? "Withdrawal",
-    callback_url: params.callbackUrl,
-    channel: params.network_code ?? "MPESA",
-    currency: params.currency ?? "KES",
-  });
+  let rawData: Record<string, unknown>;
+  try {
+    rawData = await client.post<Record<string, unknown>>("/api/v2/withdrawal", {
+      phone_number,
+      amount: params.amount,
+      narration: params.narration ?? "Withdrawal",
+      callback_url: params.callbackUrl,
+      channel: params.network_code ?? "MPESA",
+      currency: params.currency ?? "KES",
+    });
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.data) {
+      rawData =
+        typeof err.response.data === "object" && err.response.data !== null
+          ? (err.response.data as Record<string, unknown>)
+          : { message: String(err.response.data) };
+    } else {
+      throw err;
+    }
+  }
 
   const correlatorId = (rawData["correlator_id"] ?? null) as string | null;
   const txRef = (rawData["transaction_reference"] ?? null) as string | null;
-  const success = rawData["success"] !== false && rawData["status"] !== "failed";
-  const message = String(
-    rawData["message"] ?? rawData["description"] ?? rawData["error"] ?? "Payout initiated",
-  );
+  const status = String(rawData["status"] ?? "").toLowerCase();
+  const success =
+    rawData["success"] === true ||
+    (rawData["success"] !== false && status !== "failed" && !!correlatorId);
+  const message = extractPaydResponseMessage(rawData);
 
   return {
     rawData,
@@ -359,7 +382,19 @@ export async function getActivePaydClient(): Promise<PaydClient | null> {
   return null;
 }
 
-export function getCallbackBase(): string {
+export function getCallbackBase(req?: Pick<Request, "get" | "protocol">): string {
+  const appUrl = process.env["APP_PUBLIC_URL"] ?? process.env["PUBLIC_URL"];
+  if (appUrl) return appUrl.replace(/\/+$/, "");
+
+  if (req) {
+    const forwardedHost = req.get("x-forwarded-host");
+    const host = (forwardedHost ?? req.get("host") ?? "").split(",")[0]?.trim();
+    if (host && !host.includes("localhost") && !host.startsWith("127.0.0.1")) {
+      const proto = req.get("x-forwarded-proto") ?? req.protocol ?? "https";
+      return `${proto}://${host}`.replace(/\/+$/, "");
+    }
+  }
+
   const domains = process.env["REPLIT_DOMAINS"];
   if (domains) {
     const primary = domains.split(",")[0]?.trim();

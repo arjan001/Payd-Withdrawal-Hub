@@ -55,10 +55,10 @@ export default function Settings() {
     saveCredentials.mutate(
       {
         data: {
-          payd_username: data.payd_username,
-          payd_password: data.payd_password,
-          payd_account_username: data.payd_account_username,
-          payd_api_secret: data.payd_api_secret || null,
+          payd_username: data.payd_username.trim().replace(/\s+/g, ""),
+          payd_password: data.payd_password.trim(),
+          payd_account_username: data.payd_account_username.trim().replace(/\s+/g, ""),
+          payd_api_secret: data.payd_api_secret?.trim() || null,
         },
       },
       {
@@ -165,8 +165,8 @@ export default function Settings() {
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {status.withdrawals_enabled
-                    ? "Users can initiate M-Pesa and merchant payouts."
-                    : "All withdrawal attempts will be blocked with a generic error."}
+                    ? "M-Pesa and merchant payouts are active for your saved credentials."
+                    : "Save your API credentials to enable withdrawals."}
                 </p>
               </div>
               <Switch

@@ -2,7 +2,11 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, credentialsTable, ensureCredentialsTable, dropLegacyPaydAccountUsernameConstraint } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { type AuthRequest } from "../middlewares/auth";
-import { resolveCredentialRowForUser } from "../lib/payd";
+import { resolveCredentialRowForUser, getCredentialRowByUserId } from "../lib/payd";
+
+function trimCredential(value: string): string {
+  return value.trim().replace(/\s+/g, "");
+}
 
 const router: IRouter = Router();
 
@@ -43,19 +47,33 @@ function validateInput(body: unknown): {
   if (typeof b["payd_username"] !== "string" || !b["payd_username"]) return null;
   if (typeof b["payd_password"] !== "string" || !b["payd_password"]) return null;
   if (typeof b["payd_account_username"] !== "string" || !b["payd_account_username"]) return null;
-  return {
-    payd_username: b["payd_username"] as string,
-    payd_password: b["payd_password"] as string,
-    payd_api_secret: typeof b["payd_api_secret"] === "string" ? b["payd_api_secret"] : null,
-    payd_account_username: b["payd_account_username"] as string,
-  };
+  const payd_username = trimCredential(b["payd_username"] as string);
+  const payd_password = (b["payd_password"] as string).trim();
+  const payd_account_username = trimCredential(b["payd_account_username"] as string);
+  const payd_api_secret =
+    typeof b["payd_api_secret"] === "string" && b["payd_api_secret"].trim()
+      ? b["payd_api_secret"].trim()
+      : null;
+
+  if (!payd_username || !payd_password || !payd_account_username) return null;
+
+  return { payd_username, payd_password, payd_api_secret, payd_account_username };
 }
 
 // GET /api/settings/credentials — return credentials for the logged-in user
 router.get("/settings/credentials", async (req: Request, res: Response): Promise<void> => {
   const userId = (req as AuthRequest).user.userId;
   try {
-    const row = await resolveCredentialRowForUser(userId);
+    let row = await resolveCredentialRowForUser(userId);
+
+    if (row && !row.withdrawalsEnabled) {
+      const [updated] = await db
+        .update(credentialsTable)
+        .set({ withdrawalsEnabled: true, updatedAt: new Date() })
+        .where(eq(credentialsTable.userId, userId))
+        .returning();
+      if (updated) row = updated;
+    }
 
     if (row) {
       res.json({
@@ -65,7 +83,7 @@ router.get("/settings/credentials", async (req: Request, res: Response): Promise
         payd_password: row.paydPassword,
         payd_api_secret: row.paydApiSecret,
         is_active: row.isActive,
-        withdrawals_enabled: row.withdrawalsEnabled,
+        withdrawals_enabled: true,
         has_api_key: true,
         has_password: true,
         has_api_secret: !!row.paydApiSecret,
@@ -105,33 +123,29 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
       updatedAt: new Date(),
     };
 
-    const upsertCredentials = () =>
-      db
-        .insert(credentialsTable)
-        .values(credentialPatch)
-        .onConflictDoUpdate({
-          target: credentialsTable.userId,
-          set: {
-            paydUsername: payd_username,
-            paydPassword: payd_password,
-            paydApiSecret: payd_api_secret ?? null,
-            paydAccountUsername: payd_account_username,
-            withdrawalsEnabled: true,
-            updatedAt: new Date(),
-          },
-        })
-        .returning();
-
+    const existing = await getCredentialRowByUserId(userId);
     let saved: typeof credentialsTable.$inferSelect | undefined;
-    try {
-      [saved] = await upsertCredentials();
-    } catch (err) {
-      const pgCode = (err as { code?: string }).code;
-      if (pgCode === "23505") {
-        await dropLegacyPaydAccountUsernameConstraint();
-        [saved] = await upsertCredentials();
-      } else {
-        throw err;
+
+    if (existing) {
+      [saved] = await db
+        .update(credentialsTable)
+        .set(credentialPatch)
+        .where(eq(credentialsTable.userId, userId))
+        .returning();
+    } else {
+      const insertRow = async () =>
+        db.insert(credentialsTable).values(credentialPatch).returning();
+
+      try {
+        [saved] = await insertRow();
+      } catch (err) {
+        const pgCode = (err as { code?: string }).code;
+        if (pgCode === "23505") {
+          await dropLegacyPaydAccountUsernameConstraint();
+          [saved] = await insertRow();
+        } else {
+          throw err;
+        }
       }
     }
 
@@ -149,7 +163,7 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
       payd_password,
       payd_api_secret: payd_api_secret ?? null,
       is_active: saved.isActive,
-      withdrawals_enabled: saved.withdrawalsEnabled,
+      withdrawals_enabled: true,
       has_api_key: true,
       has_password: true,
       has_api_secret: !!payd_api_secret,
@@ -160,7 +174,7 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
   }
 });
 
-// PATCH /api/settings/credentials/withdrawals — toggle withdrawals on/off for the logged-in user
+// PATCH /api/settings/credentials/withdrawals — saved credentials may always withdraw
 router.patch("/settings/credentials/withdrawals", async (req: Request, res: Response): Promise<void> => {
   const userId = (req as AuthRequest).user.userId;
   try {
@@ -172,15 +186,15 @@ router.patch("/settings/credentials/withdrawals", async (req: Request, res: Resp
     await ensureCredentialsTable();
     const result = await db
       .update(credentialsTable)
-      .set({ withdrawalsEnabled: body["enabled"] as boolean, updatedAt: new Date() })
+      .set({ withdrawalsEnabled: true, updatedAt: new Date() })
       .where(eq(credentialsTable.userId, userId))
       .returning();
     if (!result[0]) {
       res.status(404).json({ error: "No credentials found for this user" });
       return;
     }
-    req.log.info({ userId, enabled: body["enabled"] }, "Withdrawals toggle updated");
-    res.json({ withdrawals_enabled: result[0].withdrawalsEnabled });
+    req.log.info({ userId, requested: body["enabled"] }, "Withdrawals enabled for user credentials");
+    res.json({ withdrawals_enabled: true });
   } catch (err) {
     req.log.error({ err }, "Failed to toggle withdrawals");
     res.status(500).json({ error: "Failed to toggle withdrawals", message: String(err) });
