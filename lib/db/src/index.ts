@@ -3,11 +3,11 @@ import { sql as dsql } from "drizzle-orm";
 import pg from "pg";
 import * as schema from "./schema";
 
-const connectionString = process.env.DATABASE_URL;
+const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
 
 if (!connectionString) {
   throw new Error(
-    "No database connection string found. Set DATABASE_URL.",
+    "No database connection string found. Set DATABASE_URL or SUPABASE_DB_URL.",
   );
 }
 
