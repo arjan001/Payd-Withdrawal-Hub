@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql as dsql } from "drizzle-orm";
 import pg from "pg";
+import { URL } from "url";
 import * as schema from "./schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -22,11 +23,19 @@ function initPool(): pg.Pool {
   }
 
   console.log("[v0 DB] Creating pg.Pool with connectionString:", connectionString);
-  _pool = new pg.Pool({ 
-    connectionString,
-    ssl: connectionString?.includes('neon') ? { rejectUnauthorized: false } : false
-  });
-  console.log("[v0 DB] Pool created, host:", _pool.options?.host, "port:", _pool.options?.port);
+  // Parse the connection string using Node's URL API
+  const params = new URL(connectionString);
+  const config = {
+    user: decodeURIComponent(params.username),
+    password: decodeURIComponent(params.password),
+    host: params.hostname,
+    port: params.port ? parseInt(params.port) : 5432,
+    database: params.pathname.slice(1),
+    ssl: params.searchParams.get('sslmode') === 'require' ? { rejectUnauthorized: false } : false,
+  };
+  console.log("[v0 DB] Connecting to:", config.host, ":", config.port, "database:", config.database);
+  _pool = new pg.Pool(config);
+  console.log("[v0 DB] Pool created successfully");
   return _pool;
 }
 
@@ -169,9 +178,9 @@ export async function dropLegacyPaydAccountUsernameConstraint(): Promise<void> {
   `);
 }
 
-// Backward-compat alias used in routes that call ensureCredentialsTable()
+// Backward-compat alias - tables are pre-created in Neon
 export function ensureCredentialsTable(): Promise<void> {
-  return initializeDatabase();
+  return Promise.resolve();
 }
 
 export * from "./schema";
