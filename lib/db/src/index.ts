@@ -22,8 +22,11 @@ function initPool(): pg.Pool {
   }
 
   console.log("[v0 DB] Creating pg.Pool with connectionString:", connectionString);
-  _pool = new pg.Pool({ connectionString });
-  console.log("[v0 DB] Pool created, host will be:", _pool.options?.host);
+  _pool = new pg.Pool({ 
+    connectionString,
+    ssl: connectionString?.includes('neon') ? { rejectUnauthorized: false } : false
+  });
+  console.log("[v0 DB] Pool created, host:", _pool.options?.host, "port:", _pool.options?.port);
   return _pool;
 }
 
