@@ -3,17 +3,27 @@ import { sql as dsql } from "drizzle-orm";
 import pg from "pg";
 import * as schema from "./schema";
 
-const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+let connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || process.env.POSTGRES_URL;
 
 if (!connectionString) {
   throw new Error(
-    "No database connection string found. Set DATABASE_URL or SUPABASE_DB_URL.",
+    "No database connection string found. Set DATABASE_URL, POSTGRES_URL, or SUPABASE_DB_URL.",
   );
 }
 
-const pool = new pg.Pool({ connectionString });
+// For Supabase, add SSL mode that allows self-signed certificates
+if (connectionString.includes('supabase')) {
+  connectionString = connectionString.includes('?') 
+    ? connectionString + '&sslmode=require' 
+    : connectionString + '?sslmode=require';
+}
 
-export const db = drizzle(pool, { schema });
+const pool = new pg.Pool({ 
+  connectionString,
+  ssl: { rejectUnauthorized: false }
+});
+
+export const db = drizzle({ client: pool, schema });
 
 // ─── Auto-setup: idempotent full schema init ──────────────────────────────────
 // Called once at server startup. Safe to run on every boot — all statements

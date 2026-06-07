@@ -42,6 +42,7 @@ interface UserRow {
   usd_available: number | null;
   usd_ledger: number | null;
   balance_error: string | null;
+  balances?: Array<{ currency: string; available_balance: number; ledger_balance: number }> | null;
 }
 
 const withdrawSchema = z.object({
