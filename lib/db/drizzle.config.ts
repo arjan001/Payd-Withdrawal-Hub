@@ -1,11 +1,11 @@
 import { defineConfig } from "drizzle-kit";
 import path from "path";
 
-const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || process.env.POSTGRES_URL;
 
 if (!connectionString) {
   throw new Error(
-    "No database connection string found. Set DATABASE_URL or SUPABASE_DB_URL.",
+    "No database connection string found. Set DATABASE_URL, SUPABASE_DB_URL, or POSTGRES_URL.",
   );
 }
 

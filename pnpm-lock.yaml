@@ -658,6 +658,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.6.2
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
+      pg:
+        specifier: ^8.21.0
+        version: 8.21.0
       tsx:
         specifier: 'catalog:'
         version: 4.21.0
