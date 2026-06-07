@@ -3,17 +3,39 @@ import { sql as dsql } from "drizzle-orm";
 import pg from "pg";
 import * as schema from "./schema";
 
-const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+let _db: ReturnType<typeof drizzle> | null = null;
+let _pool: pg.Pool | null = null;
 
-if (!connectionString) {
-  throw new Error(
-    "No database connection string found. Set DATABASE_URL or SUPABASE_DB_URL.",
-  );
+function initPool(): pg.Pool {
+  if (_pool) return _pool;
+  
+  const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+  
+  console.log("[v0 DB] DATABASE_URL available:", !!process.env.DATABASE_URL);
+  console.log("[v0 DB] SUPABASE_DB_URL available:", !!process.env.SUPABASE_DB_URL);
+  console.log("[v0 DB] connectionString first 30 chars:", connectionString?.substring(0, 30) || "null");
+
+  if (!connectionString) {
+    throw new Error(
+      "No database connection string found. Set DATABASE_URL or SUPABASE_DB_URL.",
+    );
+  }
+
+  console.log("[v0 DB] Creating pg.Pool with connectionString:", connectionString);
+  _pool = new pg.Pool({ connectionString });
+  console.log("[v0 DB] Pool created, host will be:", _pool.options?.host);
+  return _pool;
 }
 
-const pool = new pg.Pool({ connectionString });
-
-export const db = drizzle(pool, { schema });
+export const db = new Proxy({} as ReturnType<typeof drizzle>, {
+  get: (_, prop) => {
+    if (!_db) {
+      const pool = initPool();
+      _db = drizzle(pool, { schema });
+    }
+    return Reflect.get(_db as any, prop);
+  },
+});
 
 // ─── Auto-setup: idempotent full schema init ──────────────────────────────────
 // Called once at server startup. Safe to run on every boot — all statements
