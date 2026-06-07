@@ -8,9 +8,6 @@ import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
-// Admin routes first — fully public, no session/login required (/test panel)
-router.use(adminRouter);
-
 // Public routes — no auth required
 router.use(healthRouter);
 router.use(authRouter);
@@ -20,3 +17,5 @@ router.use(requireAuth, paydRouter);
 router.use(requireAuth, settingsRouter);
 
 export default router;
+
+// Admin routes are mounted separately in app.ts at the root level
