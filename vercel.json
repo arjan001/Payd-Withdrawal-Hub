@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "pnpm run build",
+  "outputDirectory": "artifacts/api-server/dist",
+  "framework": "express",
+  "env": {
+    "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+  },
+  "functions": {
+    "api/**/*.ts": {
+      "memory": 3008,
+      "maxDuration": 60
+    }
+  }
+}
