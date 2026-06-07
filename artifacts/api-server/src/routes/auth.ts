@@ -8,8 +8,19 @@ import { signToken, verifyToken, SESSION_COOKIE, COOKIE_OPTS } from "../middlewa
 const router: IRouter = Router();
 
 async function ensureUsersTable() {
-  // Tables are pre-created in Neon - this is a no-op now
-  return Promise.resolve();
+  await db.execute(dsql`
+    CREATE TABLE IF NOT EXISTS "users" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "name" text NOT NULL,
+      "email" text NOT NULL,
+      "password_hash" text NOT NULL,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `);
+  await db.execute(dsql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "users_email_idx" ON "users" USING btree ("email")
+  `);
 }
 
 // GET /api/auth/me
